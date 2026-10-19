@@ -1,0 +1,344 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Chess 3D Mini Game | Cờ Vua 3D Đỉnh Cao</title>
+    <meta name="description" content="Trò chơi Cờ Vua 3D tuyệt đẹp với đồ họa Three.js chân thực, chế độ đấu với AI thông minh, 2 người chơi, hiệu ứng âm thanh sống động và nhiều chủ đề sang trọng." />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700;900&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <!-- 3D Canvas Container -->
+    <div id="canvas-container"></div>
+
+    <!-- UI Overlay -->
+    <div id="game-ui">
+      <!-- Top Section (Header + Sub-Bar) -->
+      <div id="top-section" class="top-section">
+        <header id="top-bar" class="glass-panel">
+          <div class="brand">
+            <div class="logo-icon">♔</div>
+            <div class="logo-text">
+              <h1>CHESS 3D</h1>
+              <span class="subtitle">GRANDMASTER EDITION</span>
+            </div>
+          </div>
+
+          <!-- Clocks & Active Turn Indicator -->
+          <div class="game-status-center">
+            <!-- Black Player Card -->
+            <div class="player-card black-card" id="black-player-card">
+              <div class="player-info">
+                <span class="player-avatar">♚</span>
+                <div class="player-meta">
+                  <span class="player-name" id="black-name-label">Quân Đen (AI)</span>
+                  <div class="captured-tray" id="black-captured"></div>
+                </div>
+              </div>
+              <div class="player-timer" id="black-timer">10:00</div>
+            </div>
+
+            <!-- Turn & Advantage Badge -->
+            <div class="turn-status-badge" id="turn-badge">
+              <span class="turn-dot white-turn"></span>
+              <span class="turn-label" id="turn-label">Lượt: Trắng</span>
+              <span class="advantage-pill" id="advantage-pill">+0</span>
+            </div>
+
+            <!-- White Player Card -->
+            <div class="player-card white-card active" id="white-player-card">
+              <div class="player-info">
+                <span class="player-avatar">♔</span>
+                <div class="player-meta">
+                  <span class="player-name" id="white-name-label">Quân Trắng (Bạn)</span>
+                  <div class="captured-tray" id="white-captured"></div>
+                </div>
+              </div>
+              <div class="player-timer" id="white-timer">10:00</div>
+            </div>
+          </div>
+
+          <!-- Top Right Utility Buttons -->
+          <div class="top-actions">
+            <button id="btn-play-friend" class="btn-accent-pill" title="Chơi cờ với bạn bè qua mã phòng">
+              <span class="icon">👥</span>
+              <span>Chơi với bạn</span>
+            </button>
+            <button id="btn-sound" class="btn-icon" title="Bật/Tắt Âm thanh">
+              <span class="icon">🔊</span>
+            </button>
+            <button id="btn-theme-toggle" class="btn-icon" title="Đổi Giao diện / Chủ đề">
+              <span class="icon">🎨</span>
+            </button>
+            <button id="btn-history-toggle" class="btn-icon" title="Ẩn/Hiện Lịch sử nước đi">
+              <span class="icon">📜</span>
+            </button>
+            <button id="btn-settings" class="btn-icon" title="Cài đặt trò chơi">
+              <span class="icon">⚙️</span>
+            </button>
+          </div>
+        </header>
+
+        <!-- Sub-Bar: Quick Difficulty Pills & Online Room Status -->
+        <div id="sub-bar" class="sub-bar">
+          <!-- Quick AI Difficulty Pills (visible in PvE mode) -->
+          <div id="quick-diff-group" class="quick-diff-group glass-panel">
+            <span class="diff-title">Cấp độ AI:</span>
+            <div class="diff-buttons">
+              <button class="diff-pill" data-diff="easy" title="Cấp độ Dễ: Nước đi ngẫu nhiên & bắt quân cơ bản">
+                <span class="dot dot-easy">●</span> Dễ (Easy)
+              </button>
+              <button class="diff-pill active" data-diff="medium" title="Cấp độ Vừa: Chiến thuật trung bình kiểm soát tâm">
+                <span class="dot dot-med">●</span> Vừa (Medium)
+              </button>
+              <button class="diff-pill" data-diff="hard" title="Cấp độ Khó: Minimax + Quiescence sắc bén">
+                <span class="dot dot-hard">●</span> Khó (Hard)
+              </button>
+            </div>
+          </div>
+
+          <!-- Online Room Active Banner (visible in Multiplayer mode) -->
+          <div id="online-room-banner" class="online-room-banner glass-panel hidden">
+            <div class="online-indicator">
+              <span class="pulse-dot"></span>
+              <span>Phòng Đấu: <strong id="room-code-badge">------</strong></span>
+            </div>
+            <span class="online-separator">|</span>
+            <span class="online-my-role">Bạn là quân: <strong id="my-color-badge">Trắng</strong></span>
+            <button id="btn-copy-room-link" class="btn-copy-badge" title="Sao chép link mời">📋 Copy Link</button>
+            <button id="btn-leave-room" class="btn-leave-badge" title="Rời phòng đấu">✕ Rời phòng</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Sidebar / Move History Panel -->
+      <aside id="history-panel" class="glass-panel">
+        <div class="panel-header">
+          <h3>LỊCH SỬ NƯỚC ĐI</h3>
+          <span class="move-counter" id="move-counter">0 Nước</span>
+        </div>
+        <div class="moves-scroll" id="moves-container">
+          <div class="empty-history">Chưa có nước đi nào</div>
+        </div>
+      </aside>
+
+      <!-- Bottom Interactive Control Dock -->
+      <footer id="bottom-dock" class="glass-panel">
+        <!-- Camera Controls -->
+        <div class="control-group">
+          <span class="group-label">Góc nhìn</span>
+          <div class="button-toggle-row">
+            <button class="btn-pill active" data-camera="white">Trắng</button>
+            <button class="btn-pill" data-camera="black">Đen</button>
+            <button class="btn-pill" data-camera="top">2D</button>
+            <button class="btn-pill" data-camera="free">Tự do</button>
+          </div>
+        </div>
+
+        <div class="divider-v"></div>
+
+        <!-- Gameplay Action Buttons -->
+        <div class="control-group">
+          <span class="group-label">Thao tác</span>
+          <div class="action-buttons-row">
+            <button id="btn-undo" class="btn-action" title="Đi lại nước trước">
+              <span class="icon">↩</span>
+              <span>Đi lại</span>
+            </button>
+            <button id="btn-hint" class="btn-action" title="Gợi ý nước đi tốt nhất">
+              <span class="icon">💡</span>
+              <span>Gợi ý</span>
+            </button>
+            <button id="btn-flip" class="btn-action" title="Xoay bàn cờ">
+              <span class="icon">🔄</span>
+              <span>Xoay</span>
+            </button>
+            <button id="btn-restart" class="btn-action danger" title="Chơi ván mới">
+              <span class="icon">⚔️</span>
+              <span>Ván mới</span>
+            </button>
+          </div>
+        </div>
+      </footer>
+    </div>
+
+    <!-- Modals & Popups -->
+
+    <!-- Pawn Promotion Modal -->
+    <div id="promotion-modal" class="modal-overlay hidden">
+      <div class="modal-content glass-panel">
+        <h2>Phong Cấp Tốt</h2>
+        <p>Chọn quân cờ bạn muốn nâng cấp:</p>
+        <div class="promotion-options">
+          <button class="promo-btn" data-piece="q">
+            <div class="promo-icon">♛</div>
+            <span>Hậu (Queen)</span>
+          </button>
+          <button class="promo-btn" data-piece="r">
+            <div class="promo-icon">♜</div>
+            <span>Xe (Rook)</span>
+          </button>
+          <button class="promo-btn" data-piece="b">
+            <div class="promo-icon">♝</div>
+            <span>Tượng (Bishop)</span>
+          </button>
+          <button class="promo-btn" data-piece="n">
+            <div class="promo-icon">♞</div>
+            <span>Mã (Knight)</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Multiplayer / Room Code Modal -->
+    <div id="multiplayer-modal" class="modal-overlay hidden">
+      <div class="modal-content glass-panel">
+        <div class="modal-header">
+          <h2>Chơi Cùng Bạn Bè (Online)</h2>
+          <button id="btn-close-multiplayer" class="btn-close">&times;</button>
+        </div>
+
+        <!-- Tabs -->
+        <div class="modal-tabs">
+          <button id="tab-create-room" class="tab-btn active">Tạo Phòng Mới</button>
+          <button id="tab-join-room" class="tab-btn">Vào Bằng Mã</button>
+        </div>
+
+        <!-- Tab 1: Create Room Panel -->
+        <div id="panel-create-room" class="tab-panel active">
+          <p class="tab-desc">Tạo phòng và gửi mã 6 ký tự cho bạn bè để cùng chơi trên 2 thiết bị khác nhau!</p>
+
+          <div class="room-code-box">
+            <span class="room-code-label">MÃ PHÒNG CỦA BẠN</span>
+            <div class="room-code-display">
+              <span id="display-room-code">------</span>
+              <button id="btn-copy-code" class="btn-copy" title="Sao chép mã phòng">📋 Sao chép</button>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <label>Chọn quân của bạn:</label>
+            <div class="color-select-row">
+              <label class="radio-card active" data-color="w">
+                <input type="radio" name="host-color" value="w" checked />
+                <span class="icon">♔</span>
+                <span>Trắng (Đi trước)</span>
+              </label>
+              <label class="radio-card" data-color="b">
+                <input type="radio" name="host-color" value="b" />
+                <span class="icon">♚</span>
+                <span>Đen (Đi sau)</span>
+              </label>
+            </div>
+          </div>
+
+          <div id="host-waiting-status" class="host-waiting-status hidden">
+            <div class="radar-pulse"></div>
+            <span>Đang chờ bạn bè kết nối... Gửi mã phòng cho bạn bè!</span>
+          </div>
+
+          <div class="modal-actions">
+            <button id="btn-start-hosting" class="btn-primary">Mở Phòng & Chờ Bạn</button>
+          </div>
+        </div>
+
+        <!-- Tab 2: Join Room Panel -->
+        <div id="panel-join-room" class="tab-panel">
+          <p class="tab-desc">Nhập mã phòng 6 ký tự bạn nhận được từ người bạn của mình:</p>
+
+          <div class="join-input-wrap">
+            <input type="text" id="join-code-input" class="join-input" maxlength="8" placeholder="VD: K9X2P7" autofocus />
+          </div>
+
+          <div id="join-status-msg" class="join-status-msg hidden"></div>
+
+          <div class="modal-actions">
+            <button id="btn-submit-join" class="btn-primary">Tham Gia Trận Đấu</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Settings / New Game Modal -->
+    <div id="settings-modal" class="modal-overlay hidden">
+      <div class="modal-content glass-panel">
+        <div class="modal-header">
+          <h2>Cài Đặt Trò Chơi</h2>
+          <button id="btn-close-settings" class="btn-close">&times;</button>
+        </div>
+
+        <div class="settings-form">
+          <div class="form-row">
+            <label for="mode-select">Chế độ chơi:</label>
+            <select id="mode-select" class="form-select">
+              <option value="pve" selected>Chơi với Máy (AI)</option>
+              <option value="pvp">2 Người chơi (Pass & Play)</option>
+            </select>
+          </div>
+
+          <div class="form-row" id="difficulty-row">
+            <label for="ai-difficulty">Độ khó AI:</label>
+            <select id="ai-difficulty" class="form-select">
+              <option value="easy">Dễ (Tập sự)</option>
+              <option value="medium" selected>Trung bình (Kiện tướng)</option>
+              <option value="hard">Khó (Đại kiện tướng)</option>
+            </select>
+          </div>
+
+          <div class="form-row">
+            <label for="timer-select">Thời gian mỗi bên:</label>
+            <select id="timer-select" class="form-select">
+              <option value="0">Không giới hạn</option>
+              <option value="300">Blitz 5 phút</option>
+              <option value="600" selected>Rapid 10 phút</option>
+              <option value="900">15 phút</option>
+            </select>
+          </div>
+
+          <div class="form-row">
+            <label for="theme-select">Chủ đề bàn cờ:</label>
+            <select id="theme-select" class="form-select">
+              <option value="classic" selected>Gỗ Cổ Điển & Cẩm Thạch</option>
+              <option value="cyberpunk">Cyberpunk Neon & Hologram</option>
+              <option value="royal">Hoàng Gia Vàng 24K & Bạch Kim</option>
+            </select>
+          </div>
+
+          <div class="form-row checkbox-row">
+            <label>
+              <input type="checkbox" id="auto-flip-check" />
+              <span>Tự động xoay bàn cờ theo lượt (khi đấu 2 người)</span>
+            </label>
+          </div>
+        </div>
+
+        <div class="modal-actions">
+          <button id="btn-apply-settings" class="btn-primary">Áp Dụng & Bắt Đầu Lại</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Game Over Banner / Modal -->
+    <div id="gameover-modal" class="modal-overlay hidden">
+      <div class="modal-content glass-panel text-center">
+        <div class="trophy-icon" id="gameover-icon">🏆</div>
+        <h2 id="gameover-title">CHIẾN THẮNG!</h2>
+        <p id="gameover-desc">Quân Trắng thắng bằng chiếu bí!</p>
+        <div class="gameover-stats" id="gameover-stats">
+          <span>Tổng số nước đi: <strong>32</strong></span>
+        </div>
+        <div class="modal-actions">
+          <button id="btn-play-again" class="btn-primary">Chơi Ván Mới</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Alert / Toast Message -->
+    <div id="toast-message" class="toast hidden"></div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
