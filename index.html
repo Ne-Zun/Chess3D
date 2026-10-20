@@ -63,10 +63,33 @@
 
           <!-- Top Right Utility Buttons -->
           <div class="top-actions">
+            <!-- User Rank Badge -->
+            <div id="user-rank-badge" class="rank-badge-pill" title="Hồ sơ Xếp Hạng & Điểm Rank">
+              <span class="rank-icon" id="top-rank-icon">🌱</span>
+              <div class="rank-meta">
+                <span class="rank-name" id="top-rank-name">Tân Thủ 1</span>
+                <span class="rank-rp" id="top-rank-rp">0 RP</span>
+              </div>
+            </div>
+
+            <!-- Ranked Matchmaking Button -->
+            <button id="btn-play-ranked" class="btn-ranked-pill" title="Ghép trận ngẫu nhiên với người chơi đồng hạng rank">
+              <span class="icon">⚔️</span>
+              <span>Đấu Rank</span>
+            </button>
+
+            <!-- Monthly Leaderboard Button -->
+            <button id="btn-leaderboard" class="btn-leaderboard-pill" title="Bảng xếp hạng tháng & Thách đấu Top 1-3">
+              <span class="icon">🏆</span>
+              <span>BXH Tháng</span>
+            </button>
+
+            <!-- Friend Room Button -->
             <button id="btn-play-friend" class="btn-accent-pill" title="Chơi cờ với bạn bè qua mã phòng">
               <span class="icon">👥</span>
               <span>Chơi với bạn</span>
             </button>
+
             <button id="btn-sound" class="btn-icon" title="Bật/Tắt Âm thanh">
               <span class="icon">🔊</span>
             </button>
@@ -82,7 +105,7 @@
           </div>
         </header>
 
-        <!-- Sub-Bar: Quick Difficulty Pills & Online Room Status -->
+        <!-- Sub-Bar: Quick Difficulty Pills & Online / Ranked Room Status -->
         <div id="sub-bar" class="sub-bar">
           <!-- Quick AI Difficulty Pills (visible in PvE mode) -->
           <div id="quick-diff-group" class="quick-diff-group glass-panel">
@@ -100,6 +123,19 @@
             </div>
           </div>
 
+          <!-- Ranked Match Active Banner -->
+          <div id="ranked-match-banner" class="ranked-match-banner glass-panel hidden">
+            <div class="ranked-indicator">
+              <span class="pulse-dot ranked-pulse"></span>
+              <span id="banner-mode-title">ĐẤU XẾP HẠNG:</span>
+              <strong id="banner-match-desc">Đồng Hạng Rank</strong>
+            </div>
+            <span class="online-separator">|</span>
+            <span class="ranked-stakes" id="banner-stakes-text">Thắng: +25 RP | Thua: -10 RP</span>
+            <button id="btn-resign-ranked" class="btn-resign-badge" title="Đầu hàng ván đấu này">🏳️ Đầu hàng</button>
+            <button id="btn-leave-ranked" class="btn-leave-badge" title="Rời khỏi phòng đấu">🚪 Rời phòng</button>
+          </div>
+
           <!-- Online Room Active Banner (visible in Multiplayer mode) -->
           <div id="online-room-banner" class="online-room-banner glass-panel hidden">
             <div class="online-indicator">
@@ -107,9 +143,13 @@
               <span>Phòng Đấu: <strong id="room-code-badge">------</strong></span>
             </div>
             <span class="online-separator">|</span>
+            <span class="online-match-count-badge" id="online-match-count-badge" style="background: rgba(168, 85, 247, 0.2); color: #c084fc; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; border: 1px solid rgba(168, 85, 247, 0.35);">Ván 1</span>
+            <span class="online-separator">|</span>
             <span class="online-my-role">Bạn là quân: <strong id="my-color-badge">Trắng</strong></span>
+            <span class="online-swap-indicator" style="font-size: 11px; background: rgba(56, 189, 248, 0.15); color: #38bdf8; padding: 2px 8px; border-radius: 999px; border: 1px solid rgba(56, 189, 248, 0.3); font-weight: 600;" title="Tự động đổi quân sau mỗi ván đấu">🔄 Đổi quân sau ván</span>
             <button id="btn-copy-room-link" class="btn-copy-badge" title="Sao chép link mời">📋 Copy Link</button>
-            <button id="btn-leave-room" class="btn-leave-badge" title="Rời phòng đấu">✕ Rời phòng</button>
+            <button id="btn-resign-multiplayer" class="btn-resign-badge" title="Đầu hàng ván cờ hiện tại">🏳️ Đầu hàng</button>
+            <button id="btn-leave-room" class="btn-leave-badge" title="Rời khỏi phòng đấu">🚪 Rời phòng</button>
           </div>
         </div>
       </div>
@@ -155,6 +195,10 @@
             <button id="btn-flip" class="btn-action" title="Xoay bàn cờ">
               <span class="icon">🔄</span>
               <span>Xoay</span>
+            </button>
+            <button id="btn-resign" class="btn-action resign" title="Đầu hàng ván cờ này">
+              <span class="icon">🏳️</span>
+              <span>Đầu hàng</span>
             </button>
             <button id="btn-restart" class="btn-action danger" title="Chơi ván mới">
               <span class="icon">⚔️</span>
@@ -330,8 +374,356 @@
         <div class="gameover-stats" id="gameover-stats">
           <span>Tổng số nước đi: <strong>32</strong></span>
         </div>
+        <div id="gameover-next-round-info" class="gameover-swap-hint hidden" style="margin: 10px 0; padding: 7px 12px; background: rgba(56, 189, 248, 0.12); border: 1px solid rgba(56, 189, 248, 0.3); border-radius: 8px; font-size: 13px; color: #38bdf8; font-weight: 600;">
+          <span id="gameover-swap-text">🔄 Ván sau sẽ tự động đổi quân: Bạn sẽ cầm quân Đen ⚫</span>
+        </div>
         <div class="modal-actions">
           <button id="btn-play-again" class="btn-primary">Chơi Ván Mới</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- First-Time In-Game Name & Avatar Setup Modal -->
+    <div id="first-time-modal" class="modal-overlay hidden">
+      <div class="modal-content glass-panel first-time-content text-center">
+        <div class="welcome-icon">👑</div>
+        <h2>CHÀO MỪNG ĐẾN VỚI CỜ VUA 3D</h2>
+        <p class="first-time-desc">Hãy đặt <strong>Tên In-game</strong> và chọn linh vật đại diện của bạn để bước vào Đấu Trường Xếp Hạng PvP cùng các kỳ thủ khác!</p>
+
+        <!-- Avatar Picker -->
+        <div class="avatar-picker-section">
+          <label class="section-label">Chọn linh vật đại diện:</label>
+          <div class="avatar-options" id="first-time-avatar-options">
+            <button type="button" class="avatar-opt-btn active" data-avatar="👑">👑</button>
+            <button type="button" class="avatar-opt-btn" data-avatar="⚔️">⚔️</button>
+            <button type="button" class="avatar-opt-btn" data-avatar="😎">😎</button>
+            <button type="button" class="avatar-opt-btn" data-avatar="🦁">🦁</button>
+            <button type="button" class="avatar-opt-btn" data-avatar="🐉">🐉</button>
+            <button type="button" class="avatar-opt-btn" data-avatar="⚡">⚡</button>
+            <button type="button" class="avatar-opt-btn" data-avatar="🦅">🦅</button>
+            <button type="button" class="avatar-opt-btn" data-avatar="🏆">🏆</button>
+            <button type="button" class="avatar-opt-btn" data-avatar="♟️">♟️</button>
+            <button type="button" class="avatar-opt-btn" data-avatar="🧙‍♂️">🧙‍♂️</button>
+          </div>
+        </div>
+
+        <!-- Name Input -->
+        <div class="name-input-section">
+          <label class="section-label" for="first-time-name-input">Tên In-game của bạn:</label>
+          <div class="name-input-wrap">
+            <input type="text" id="first-time-name-input" class="form-input" maxlength="20" placeholder="Nhập tên nhân vật của bạn..." autofocus />
+            <button type="button" id="btn-random-name" class="btn-dice" title="Gợi ý tên kỳ thủ hay">🎲 Gợi ý</button>
+          </div>
+          <span class="name-hint">Tên này sẽ hiển thị khi thi đấu Đấu Rank PvP và trên Bảng Xếp Hạng</span>
+        </div>
+
+        <div class="modal-actions">
+          <button id="btn-submit-first-time" class="btn-primary" style="width: 100%;">Bắt Đầu Chơi Cờ</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Edit Profile Modal -->
+    <div id="profile-modal" class="modal-overlay hidden">
+      <div class="modal-content glass-panel profile-content text-center">
+        <div class="modal-header">
+          <h2>Hồ Sơ Kỳ Thủ</h2>
+          <button id="btn-close-profile" class="btn-close">&times;</button>
+        </div>
+
+        <div class="profile-avatar-display" id="profile-avatar-display">👑</div>
+        <div class="profile-rank-info">
+          <span class="profile-tier-badge" id="profile-tier-badge">🌱 Tân Thủ 1</span>
+          <span class="profile-rp-badge" id="profile-rp-badge">0 RP</span>
+        </div>
+
+        <!-- Edit Name Form -->
+        <div class="name-input-section" style="margin-top: 14px;">
+          <label class="section-label">Đổi linh vật đại diện:</label>
+          <div class="avatar-options" id="profile-avatar-options">
+            <button type="button" class="avatar-opt-btn active" data-avatar="👑">👑</button>
+            <button type="button" class="avatar-opt-btn" data-avatar="⚔️">⚔️</button>
+            <button type="button" class="avatar-opt-btn" data-avatar="😎">😎</button>
+            <button type="button" class="avatar-opt-btn" data-avatar="🦁">🦁</button>
+            <button type="button" class="avatar-opt-btn" data-avatar="🐉">🐉</button>
+            <button type="button" class="avatar-opt-btn" data-avatar="⚡">⚡</button>
+            <button type="button" class="avatar-opt-btn" data-avatar="🦅">🦅</button>
+            <button type="button" class="avatar-opt-btn" data-avatar="🏆">🏆</button>
+            <button type="button" class="avatar-opt-btn" data-avatar="♟️">♟️</button>
+            <button type="button" class="avatar-opt-btn" data-avatar="🧙‍♂️">🧙‍♂️</button>
+          </div>
+
+          <label class="section-label" for="profile-name-input" style="margin-top: 12px;">Đổi Tên In-game:</label>
+          <div class="name-input-wrap">
+            <input type="text" id="profile-name-input" class="form-input" maxlength="20" placeholder="Tên in-game mới..." />
+            <button type="button" id="btn-profile-random-name" class="btn-dice" title="Gợi ý tên kỳ thủ hay">🎲 Gợi ý</button>
+          </div>
+        </div>
+
+        <div class="modal-actions" style="margin-top: 18px;">
+          <button id="btn-save-profile" class="btn-primary" style="width: 100%;">Lưu Thay Đổi</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Ranked Matchmaking Modal (PvP Online - Không AI) -->
+    <div id="ranked-matchmaking-modal" class="modal-overlay hidden">
+      <div class="modal-content glass-panel matchmaking-content">
+        <div class="modal-header">
+          <h2>Đấu Xếp Hạng PvP Online</h2>
+          <button id="btn-close-matchmaking" class="btn-close">&times;</button>
+        </div>
+
+        <div class="matchmaking-body" id="matchmaking-searching-state">
+          <div class="radar-container">
+            <div class="radar-circle circle-1"></div>
+            <div class="radar-circle circle-2"></div>
+            <div class="radar-circle circle-3"></div>
+            <div class="radar-sweep"></div>
+            <div class="radar-center-icon">⚔️</div>
+          </div>
+          <h3 class="search-title">Đang tìm đối thủ người chơi đồng hạng...</h3>
+          <div class="queue-timer-pill" id="queue-timer-display">Thời gian chờ: 00:00</div>
+          <p class="search-desc">Chế độ Đấu Rank là đấu giữa <strong>Người Chơi với Người Chơi (PvP)</strong>, không đấu với AI. Hệ thống đang tìm người chơi trực tuyến có rank tương đương (chênh lệch tối đa &plusmn;1 bậc nhỏ).</p>
+          <div class="random-rule-pill" style="display: inline-flex; align-items: center; gap: 6px; padding: 5px 12px; background: rgba(245, 158, 11, 0.15); border: 1px solid rgba(245, 158, 11, 0.35); border-radius: 999px; font-size: 12px; color: #fbbf24; font-weight: 600; margin-bottom: 10px;">
+            <span>🎲 Quân cờ (Trắng ⚪ / Đen ⚫) được hệ thống chọn ngẫu nhiên 50/50</span>
+          </div>
+          <div class="search-player-badge">
+            <span class="badge-icon" id="search-my-badge">🌱</span>
+            <span class="badge-text" id="search-my-rank">Rank: Tân Thủ 1</span>
+          </div>
+          <div class="queue-actions-row">
+            <button id="btn-copy-queue-link" class="btn-secondary" title="Sao chép link mời đối thủ cùng bậc rank">📋 Mời bạn bè cùng rank</button>
+            <button id="btn-cancel-matchmaking" class="btn-secondary danger-btn">Hủy Tìm Trận</button>
+          </div>
+        </div>
+
+        <!-- State: Opponent Found -->
+        <div class="match-found-state hidden" id="matchmaking-found-state">
+          <div class="found-banner">⚔️ ĐÃ TÌM THẤY ĐỐI THỦ PVP!</div>
+          <div class="versus-cards">
+            <!-- Player -->
+            <div class="vs-card">
+              <span class="vs-avatar" id="vs-my-avatar">👑</span>
+              <span class="vs-name" id="vs-my-name">Bạn</span>
+              <span class="vs-rank-badge" id="vs-my-rank">Tân Thủ 1</span>
+              <span class="vs-rp" id="vs-my-rp">0 RP</span>
+              <span class="vs-color-badge" id="vs-my-color" style="margin-top: 6px; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px; background: rgba(255,255,255,0.12); color: #f8fafc; border: 1px solid rgba(255,255,255,0.25);">⚪ Quân Trắng</span>
+            </div>
+            <div class="vs-divider">VS</div>
+            <!-- Opponent -->
+            <div class="vs-card opponent">
+              <span class="vs-avatar" id="vs-opp-avatar">⚔️</span>
+              <span class="vs-name" id="vs-opp-name">Người chơi</span>
+              <span class="vs-rank-badge" id="vs-opp-rank">Tân Thủ 1</span>
+              <span class="vs-rp" id="vs-opp-rp">25 RP</span>
+              <span class="vs-color-badge" id="vs-opp-color" style="margin-top: 6px; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px; background: rgba(15,23,42,0.6); color: #94a3b8; border: 1px solid rgba(255,255,255,0.15);">⚫ Quân Đen</span>
+            </div>
+          </div>
+          <div class="countdown-badge">🎲 Đã random quân! Trận đấu bắt đầu sau <strong id="match-countdown">3</strong>s...</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Monthly Leaderboard Modal -->
+    <div id="leaderboard-modal" class="modal-overlay hidden">
+      <div class="modal-content glass-panel leaderboard-modal-content">
+        <div class="modal-header">
+          <div class="leaderboard-title-group">
+            <h2 id="lb-month-title">BẢNG XẾP HẠNG THÁNG</h2>
+            <span class="lb-subtitle">Vinh danh cao thủ & Khiêu chiến Top 1-3 BXH</span>
+          </div>
+          <div class="header-right-actions">
+            <button id="btn-open-honoring" class="btn-gold-pill" title="Xem thông báo vinh danh 3 kỳ thủ đứng đầu tháng">
+              <span>👑 Vinh Danh Top 3</span>
+            </button>
+            <button id="btn-close-leaderboard" class="btn-close">&times;</button>
+          </div>
+        </div>
+
+        <!-- Top 3 Podium Area -->
+        <div class="podium-section">
+          <!-- Top 2: Silver (Left) -->
+          <div class="podium-card silver" id="podium-card-2">
+            <div class="medal-tag">🥈 Á QUÂN</div>
+            <div class="podium-avatar">🥈</div>
+            <div class="podium-name" id="podium-name-2">Magnus_VN</div>
+            <div class="podium-rank" id="podium-rank-2">Chuyên Nghiệp 5</div>
+            <div class="podium-rp" id="podium-rp-2">275 RP</div>
+            <div class="podium-title" id="podium-title-2">Bậc Thầy Chiến Thuật</div>
+            <button class="btn-challenge-top" data-top="2">⚔️ Thách Đấu</button>
+          </div>
+
+          <!-- Top 1: Gold (Center) -->
+          <div class="podium-card gold" id="podium-card-1">
+            <div class="crown-icon">👑</div>
+            <div class="medal-tag">🥇 QUÁN QUÂN</div>
+            <div class="podium-avatar">👑</div>
+            <div class="podium-name" id="podium-name-1">Nguyễn Thành An</div>
+            <div class="podium-rank" id="podium-rank-1">Chuyên Nghiệp 5</div>
+            <div class="podium-rp" id="podium-rp-1">340 RP</div>
+            <div class="podium-title" id="podium-title-1">Vua Cờ 3D Tháng</div>
+            <button class="btn-challenge-top gold-btn" data-top="1">⚔️ Thách Đấu</button>
+          </div>
+
+          <!-- Top 3: Bronze (Right) -->
+          <div class="podium-card bronze" id="podium-card-3">
+            <div class="medal-tag">🥉 QUÝ QUÂN</div>
+            <div class="podium-avatar">🥉</div>
+            <div class="podium-name" id="podium-name-3">Đặng Minh Khoa</div>
+            <div class="podium-rank" id="podium-rank-3">Chuyên Nghiệp 4</div>
+            <div class="podium-rp" id="podium-rp-3">230 RP</div>
+            <div class="podium-title" id="podium-title-3">Kỳ Thủ Thần Tốc</div>
+            <button class="btn-challenge-top" data-top="3">⚔️ Thách Đấu</button>
+          </div>
+        </div>
+
+        <div class="challenge-notice-bar">
+          <span class="icon">💡</span>
+          <span><strong>Luật Thách Đấu Top BXH:</strong> Người chơi ở rank dưới có thể khiêu chiến Top 1-3. Nếu <strong>thắng</strong> sẽ nhận ngay danh hiệu vinh quang <em>"🏆 Thắng Top BXH"</em>. Nếu <strong>thua</strong> sẽ <strong>không bị trừ điểm rank</strong>!</span>
+        </div>
+
+        <!-- Full Table List Ranks 4+ -->
+        <div class="lb-table-wrap">
+          <table class="lb-table">
+            <thead>
+              <tr>
+                <th style="width: 50px;">Hạng</th>
+                <th>Kỳ Thủ</th>
+                <th>Cấp Rank</th>
+                <th>Điểm RP</th>
+                <th>Tỉ Lệ Thắng</th>
+                <th>Danh Hiệu</th>
+              </tr>
+            </thead>
+            <tbody id="lb-table-body">
+              <!-- Dynamically populated -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Monthly Top 3 Honoring Modal -->
+    <div id="honoring-modal" class="modal-overlay hidden">
+      <div class="modal-content glass-panel honoring-content text-center">
+        <div class="honoring-fireworks">🎆</div>
+        <div class="trophy-gold-large">🏆</div>
+        <h2 class="honoring-main-title">THÔNG BÁO VINH DANH TOP 3 XUẤT SẮC NHẤT THÁNG</h2>
+        <p class="honoring-desc" id="honoring-desc-text">Hội Đồng Cờ Vua 3D trân trọng vinh danh 3 kỳ thủ đã thi đấu xuất sắc và đạt vị trí cao nhất trên Bảng Xếp Hạng trong tháng!</p>
+
+        <div class="honoring-trio" id="honoring-trio-container">
+          <!-- Populated dynamically with Top 1, 2, 3 cards -->
+        </div>
+
+        <div class="honoring-message-box">
+          <p>🌟 <em>"Chúc mừng các kỳ thủ đã cống hiến những thế cờ đỉnh cao và tinh thần thể thao kiên cường. Toàn bộ danh hiệu và phần thưởng tháng đã được khắc ghi vào Biên Niên Sử Cờ Vua 3D!"</em></p>
+        </div>
+
+        <div class="modal-actions">
+          <button id="btn-close-honoring" class="btn-primary">Chúc Mừng & Đóng</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Top Challenge Modal -->
+    <div id="challenge-modal" class="modal-overlay hidden">
+      <div class="modal-content glass-panel challenge-content">
+        <div class="modal-header">
+          <h2>Thách Đấu Cao Thủ Top BXH</h2>
+          <button id="btn-close-challenge" class="btn-close">&times;</button>
+        </div>
+
+        <div class="challenge-body">
+          <div class="boss-intro">
+            <div class="boss-avatar-ring">
+              <span class="boss-avatar" id="ch-boss-avatar">👑</span>
+            </div>
+            <div class="boss-meta">
+              <span class="boss-rank-badge" id="ch-boss-pos">TOP 1 THÁNG</span>
+              <h3 class="boss-name" id="ch-boss-name">Nguyễn Thành An</h3>
+              <span class="boss-rank" id="ch-boss-rank">Chuyên Nghiệp 5 • 340 RP</span>
+              <p class="boss-quote" id="ch-boss-quote">"Ta là người nắm giữ ngôi vị đầu bảng. Ngươi có đủ tự tin để vượt qua nước cờ của ta?"</p>
+            </div>
+          </div>
+
+          <div class="challenge-stakes-card">
+            <h4>QUY TẮC KHIÊU CHIẾN ĐỈNH CAO:</h4>
+            <ul>
+              <li>
+                <span class="stake-icon win-icon">✨</span>
+                <div>
+                  <strong>Nếu bạn CHIẾN THẮNG:</strong>
+                  <p>Mở khóa danh hiệu Huyền Thoại vĩnh viễn: <strong class="gold-text">"🏆 Thắng Top BXH"</strong>, nhận ngay <strong>+50 RP</strong> và được vinh danh trang trọng!</p>
+                </div>
+              </li>
+              <li>
+                <span class="stake-icon safe-icon">🛡️</span>
+                <div>
+                  <strong>Nếu bạn THẤT BẠI:</strong>
+                  <p><strong>Bảo Toàn Điểm Tuyệt Đối!</strong> Bạn <strong class="green-text">KHÔNG BỊ MẤT BẤT KỲ ĐIỂM RANK NÀO</strong> (0 RP trừ).</p>
+                </div>
+              </li>
+              <li>
+                <span class="stake-icon rule-icon">⚖️</span>
+                <div>
+                  <strong>Quyền Quyết Định Của Top BXH:</strong>
+                  <p>Kỳ thủ Top BXH có quyền <strong>Chấp Nhận</strong> hoặc <strong>Từ Chối</strong> lời thách đấu tùy theo lịch trình thi đấu!</p>
+                </div>
+              </li>
+            </ul>
+          </div>
+
+          <div id="challenge-decision-status" class="challenge-decision-status hidden">
+            <div class="decision-spinner"></div>
+            <span id="challenge-status-text">Đang gửi thư khiêu chiến tới cao thủ...</span>
+          </div>
+
+          <div class="modal-actions" id="challenge-actions-row">
+            <button id="btn-send-challenge" class="btn-primary challenge-btn">Gửi Lời Khiêu Chiến Ngay</button>
+            <button id="btn-cancel-challenge" class="btn-secondary">Suy Nghĩ Lại</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Ranked Match Summary Modal -->
+    <div id="ranked-result-modal" class="modal-overlay hidden">
+      <div class="modal-content glass-panel ranked-result-content text-center">
+        <div class="result-badge-icon" id="res-badge-icon">🏆</div>
+        <h2 id="res-result-title">CHIẾN THẮNG TRẬN RANK!</h2>
+        <p id="res-result-desc">Bạn đã đánh bại đối thủ và ghi thêm điểm xếp hạng!</p>
+
+        <!-- RP Change & Progress -->
+        <div class="rp-change-box">
+          <span class="rp-diff" id="res-rp-change">+25 RP</span>
+          <div class="rank-name-row">
+            <span id="res-tier-name">Tân Thủ 1</span>
+            <span id="res-rp-current">25 / 100 RP</span>
+          </div>
+          <div class="rp-progress-track">
+            <div class="rp-progress-fill" id="res-progress-fill" style="width: 25%;"></div>
+          </div>
+        </div>
+
+        <!-- Rank Up Alert Banner (shown when promoted) -->
+        <div class="rankup-banner hidden" id="res-rankup-banner">
+          <span class="rankup-star">⭐</span>
+          <span>CHÚC MỪNG BẠN ĐÃ THĂNG HẠNG: <strong id="res-promoted-rank">Tân Thủ 2</strong>!</span>
+          <span class="rankup-star">⭐</span>
+        </div>
+
+        <!-- Special Title Reward Banner (shown when won top challenge) -->
+        <div class="title-reward-banner hidden" id="res-title-banner">
+          <span class="reward-crown">👑</span>
+          <div class="reward-text">
+            <span>DANH HIỆU MỚI ĐƯỢC MỞ KHÓA:</span>
+            <strong id="res-unlocked-title">"🏆 Thắng Top 1 BXH"</strong>
+          </div>
+        </div>
+
+        <div class="modal-actions">
+          <button id="btn-close-ranked-result" class="btn-primary">Tiếp Tục</button>
         </div>
       </div>
     </div>
