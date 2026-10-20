@@ -3,34 +3,49 @@ import { ChessGame, ChessAI, WHITE, BLACK } from './chessLogic.js';
 import { Chess3D } from './chess3D.js';
 import { sound } from './soundEngine.js';
 import { NetworkEngine } from './networkEngine.js';
+import { RankEngine, RANK_TIERS, SUGGESTED_NAMES } from './rankEngine.js';
 
 /**
- * Main Controller for Chess 3D
+ * Main Controller for Chess 3D Grandmaster Edition
  */
 class ChessApp {
   constructor() {
     this.game = new ChessGame();
     this.ai = new ChessAI('medium');
     this.network = new NetworkEngine();
+    this.rankEngine = new RankEngine();
 
-    this.mode = 'pve'; // 'pve' (Player vs AI), 'pvp' (Pass & Play), or 'multiplayer' (Online room)
-    this.playerColor = WHITE; // Player's side
+    this.mode = 'pve'; // 'pve', 'pvp', 'multiplayer', 'ranked', 'challenge'
+    this.playerColor = WHITE;
     this.autoFlip = false;
-    this.timeLimit = 600; // 10 minutes default (in seconds), 0 = untimed
+    this.timeLimit = 600; // 10 minutes rapid default
     this.timers = { [WHITE]: 600, [BLACK]: 600 };
     this.timerInterval = null;
 
-    this.selectedSquare = null; // { r, c }
+    this.selectedSquare = null;
     this.legalMovesForSelected = [];
     this.isAiThinking = false;
     this.pendingPromotionMove = null;
+
+    // Ranked & Challenge state
+    this.currentOpponent = null;
+    this.currentChallengeTop = null;
+    this.rankedRoomCode = null;
+    this.queueSeconds = 0;
+    this.queueTimerInterval = null;
+
+    this.selectedFirstTimeAvatar = '👑';
+    this.selectedProfileAvatar = '👑';
+    this.multiplayerMatchCount = 1;
 
     this.dom = {};
     this.cacheDom();
     this.init3D();
     this.initNetwork();
+    this.initRankUI();
     this.bindEvents();
     this.startNewGame();
+    this.checkFirstTimeUser();
     this.checkUrlParams();
   }
 
@@ -55,17 +70,118 @@ class ChessApp {
     this.dom.btnUndo = document.getElementById('btn-undo');
     this.dom.btnHint = document.getElementById('btn-hint');
     this.dom.btnFlip = document.getElementById('btn-flip');
+    this.dom.btnResign = document.getElementById('btn-resign');
     this.dom.btnRestart = document.getElementById('btn-restart');
 
-    // Quick Difficulty & Online status
+    // Quick Difficulty & Banners
     this.dom.quickDiffGroup = document.getElementById('quick-diff-group');
     this.dom.diffPills = document.querySelectorAll('.diff-pill');
     this.dom.btnPlayFriend = document.getElementById('btn-play-friend');
     this.dom.onlineRoomBanner = document.getElementById('online-room-banner');
     this.dom.roomCodeBadge = document.getElementById('room-code-badge');
+    this.dom.onlineMatchCountBadge = document.getElementById('online-match-count-badge');
     this.dom.myColorBadge = document.getElementById('my-color-badge');
     this.dom.btnCopyRoomLink = document.getElementById('btn-copy-room-link');
+    this.dom.btnResignMultiplayer = document.getElementById('btn-resign-multiplayer');
     this.dom.btnLeaveRoom = document.getElementById('btn-leave-room');
+
+    // Rank & Top Bar controls
+    this.dom.userRankBadge = document.getElementById('user-rank-badge');
+    this.dom.topRankIcon = document.getElementById('top-rank-icon');
+    this.dom.topRankName = document.getElementById('top-rank-name');
+    this.dom.topRankRp = document.getElementById('top-rank-rp');
+    this.dom.btnPlayRanked = document.getElementById('btn-play-ranked');
+    this.dom.btnLeaderboard = document.getElementById('btn-leaderboard');
+
+    // Ranked Match Active Banner
+    this.dom.rankedMatchBanner = document.getElementById('ranked-match-banner');
+    this.dom.bannerModeTitle = document.getElementById('banner-mode-title');
+    this.dom.bannerMatchDesc = document.getElementById('banner-match-desc');
+    this.dom.bannerStakesText = document.getElementById('banner-stakes-text');
+    this.dom.btnResignRanked = document.getElementById('btn-resign-ranked');
+    this.dom.btnLeaveRanked = document.getElementById('btn-leave-ranked');
+
+    // First Time Name Modal
+    this.dom.firstTimeModal = document.getElementById('first-time-modal');
+    this.dom.firstTimeNameInput = document.getElementById('first-time-name-input');
+    this.dom.btnRandomName = document.getElementById('btn-random-name');
+    this.dom.btnSubmitFirstTime = document.getElementById('btn-submit-first-time');
+    this.dom.firstTimeAvatarOptions = document.querySelectorAll('#first-time-avatar-options .avatar-opt-btn');
+
+    // Profile Edit Modal
+    this.dom.profileModal = document.getElementById('profile-modal');
+    this.dom.btnCloseProfile = document.getElementById('btn-close-profile');
+    this.dom.profileAvatarDisplay = document.getElementById('profile-avatar-display');
+    this.dom.profileTierBadge = document.getElementById('profile-tier-badge');
+    this.dom.profileRpBadge = document.getElementById('profile-rp-badge');
+    this.dom.profileNameInput = document.getElementById('profile-name-input');
+    this.dom.btnProfileRandomName = document.getElementById('btn-profile-random-name');
+    this.dom.btnSaveProfile = document.getElementById('btn-save-profile');
+    this.dom.profileAvatarOptions = document.querySelectorAll('#profile-avatar-options .avatar-opt-btn');
+
+    // Matchmaking Modal (PvP Online)
+    this.dom.rankedMatchmakingModal = document.getElementById('ranked-matchmaking-modal');
+    this.dom.btnCloseMatchmaking = document.getElementById('btn-close-matchmaking');
+    this.dom.btnCancelMatchmaking = document.getElementById('btn-cancel-matchmaking');
+    this.dom.btnCopyQueueLink = document.getElementById('btn-copy-queue-link');
+    this.dom.queueTimerDisplay = document.getElementById('queue-timer-display');
+    this.dom.matchmakingSearchingState = document.getElementById('matchmaking-searching-state');
+    this.dom.matchmakingFoundState = document.getElementById('matchmaking-found-state');
+    this.dom.searchMyBadge = document.getElementById('search-my-badge');
+    this.dom.searchMyRank = document.getElementById('search-my-rank');
+    this.dom.vsMyAvatar = document.getElementById('vs-my-avatar');
+    this.dom.vsMyName = document.getElementById('vs-my-name');
+    this.dom.vsMyRank = document.getElementById('vs-my-rank');
+    this.dom.vsMyRp = document.getElementById('vs-my-rp');
+    this.dom.vsMyColor = document.getElementById('vs-my-color');
+    this.dom.vsOppAvatar = document.getElementById('vs-opp-avatar');
+    this.dom.vsOppName = document.getElementById('vs-opp-name');
+    this.dom.vsOppRank = document.getElementById('vs-opp-rank');
+    this.dom.vsOppRp = document.getElementById('vs-opp-rp');
+    this.dom.vsOppColor = document.getElementById('vs-opp-color');
+    this.dom.matchCountdown = document.getElementById('match-countdown');
+
+    // Leaderboard Modal
+    this.dom.leaderboardModal = document.getElementById('leaderboard-modal');
+    this.dom.btnCloseLeaderboard = document.getElementById('btn-close-leaderboard');
+    this.dom.btnOpenHonoring = document.getElementById('btn-open-honoring');
+    this.dom.lbMonthTitle = document.getElementById('lb-month-title');
+    this.dom.lbTableBody = document.getElementById('lb-table-body');
+
+    // Honoring Modal
+    this.dom.honoringModal = document.getElementById('honoring-modal');
+    this.dom.btnCloseHonoring = document.getElementById('btn-close-honoring');
+    this.dom.honoringTrioContainer = document.getElementById('honoring-trio-container');
+    this.dom.honoringDescText = document.getElementById('honoring-desc-text');
+
+    // Challenge Top Modal
+    this.dom.challengeModal = document.getElementById('challenge-modal');
+    this.dom.btnCloseChallenge = document.getElementById('btn-close-challenge');
+    this.dom.btnSendChallenge = document.getElementById('btn-send-challenge');
+    this.dom.btnCancelChallenge = document.getElementById('btn-cancel-challenge');
+    this.dom.chBossAvatar = document.getElementById('ch-boss-avatar');
+    this.dom.chBossPos = document.getElementById('ch-boss-pos');
+    this.dom.chBossName = document.getElementById('ch-boss-name');
+    this.dom.chBossRank = document.getElementById('ch-boss-rank');
+    this.dom.chBossQuote = document.getElementById('ch-boss-quote');
+    this.dom.challengeDecisionStatus = document.getElementById('challenge-decision-status');
+    this.dom.challengeStatusText = document.getElementById('challenge-status-text');
+    this.dom.challengeActionsRow = document.getElementById('challenge-actions-row');
+
+    // Ranked Result Modal
+    this.dom.rankedResultModal = document.getElementById('ranked-result-modal');
+    this.dom.btnCloseRankedResult = document.getElementById('btn-close-ranked-result');
+    this.dom.resBadgeIcon = document.getElementById('res-badge-icon');
+    this.dom.resResultTitle = document.getElementById('res-result-title');
+    this.dom.resResultDesc = document.getElementById('res-result-desc');
+    this.dom.resRpChange = document.getElementById('res-rp-change');
+    this.dom.resTierName = document.getElementById('res-tier-name');
+    this.dom.resRpCurrent = document.getElementById('res-rp-current');
+    this.dom.resProgressFill = document.getElementById('res-progress-fill');
+    this.dom.resRankupBanner = document.getElementById('res-rankup-banner');
+    this.dom.resPromotedRank = document.getElementById('res-promoted-rank');
+    this.dom.resTitleBanner = document.getElementById('res-title-banner');
+    this.dom.resUnlockedTitle = document.getElementById('res-unlocked-title');
 
     // Multiplayer Modal
     this.dom.multiplayerModal = document.getElementById('multiplayer-modal');
@@ -83,10 +199,12 @@ class ChessApp {
     this.dom.btnSubmitJoin = document.getElementById('btn-submit-join');
     this.dom.joinStatusMsg = document.getElementById('join-status-msg');
 
-    // Settings Modal
+    // Settings Modal & Core
     this.dom.promotionModal = document.getElementById('promotion-modal');
     this.dom.settingsModal = document.getElementById('settings-modal');
     this.dom.gameoverModal = document.getElementById('gameover-modal');
+    this.dom.gameoverNextRoundInfo = document.getElementById('gameover-next-round-info');
+    this.dom.gameoverSwapText = document.getElementById('gameover-swap-text');
     this.dom.btnCloseSettings = document.getElementById('btn-close-settings');
     this.dom.btnApplySettings = document.getElementById('btn-apply-settings');
     this.dom.btnPlayAgain = document.getElementById('btn-play-again');
@@ -117,24 +235,129 @@ class ChessApp {
     this.network.onRemoteMove = this.handleRemoteMove.bind(this);
     this.network.onRemoteRematch = this.handleRemoteRematch.bind(this);
     this.network.onRemoteResign = this.handleRemoteResign.bind(this);
+    this.network.onRemotePlayerLeft = this.handleRemotePlayerLeft.bind(this);
     this.network.onError = (err) => {
       this.showJoinError(err);
       this.showToast(err);
     };
   }
 
+  initRankUI() {
+    this.updateRankBadgeUI();
+  }
+
+  updateRankBadgeUI() {
+    const tier = this.rankEngine.getCurrentTier();
+    const rankText = this.rankEngine.getRankDisplay();
+    this.dom.topRankIcon.textContent = this.rankEngine.profile.avatar || tier.badge;
+    this.dom.topRankName.textContent = `${this.rankEngine.profile.name} (${rankText})`;
+    this.dom.topRankRp.textContent = `${this.rankEngine.profile.rp} RP`;
+  }
+
+  checkFirstTimeUser() {
+    if (this.rankEngine.isFirstTimeUser()) {
+      this.dom.firstTimeNameInput.value = '';
+      this.selectedFirstTimeAvatar = '👑';
+      this.openModal(this.dom.firstTimeModal);
+      setTimeout(() => this.dom.firstTimeNameInput.focus(), 200);
+    }
+  }
+
   checkUrlParams() {
     const params = new URLSearchParams(window.location.search);
     const roomParam = params.get('room');
+    const isJoinRanked = params.get('join_ranked');
+
+    if (isJoinRanked && roomParam) {
+      const cleanCode = roomParam.trim().replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+      this.showToast(`Phát hiện link mời Đấu Rank PvP vào phòng ${cleanCode}!`);
+      this.openMatchmakingModal(cleanCode);
+      return;
+    }
+
     if (roomParam) {
+      const cleanCode = roomParam.trim().replace(/[^A-Za-z0-9]/g, '').toUpperCase();
       this.openMultiplayerModal('join');
-      this.dom.joinCodeInput.value = roomParam.trim().toUpperCase();
-      this.showToast(`Phát hiện mã phòng từ link: ${roomParam}`);
+      this.dom.joinCodeInput.value = cleanCode;
+      this.showToast(`Phát hiện mã phòng: ${cleanCode}!`);
+      setTimeout(() => {
+        this.dom.btnSubmitJoin.click();
+      }, 300);
     }
   }
 
   bindEvents() {
-    // Quick Difficulty Pills (Easy, Medium, Hard)
+    // First-Time Setup Events
+    this.dom.firstTimeAvatarOptions.forEach(btn => {
+      btn.addEventListener('click', () => {
+        this.dom.firstTimeAvatarOptions.forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        this.selectedFirstTimeAvatar = btn.getAttribute('data-avatar');
+      });
+    });
+
+    this.dom.btnRandomName.addEventListener('click', () => {
+      const rand = SUGGESTED_NAMES[Math.floor(Math.random() * SUGGESTED_NAMES.length)];
+      this.dom.firstTimeNameInput.value = rand;
+      this.dom.firstTimeNameInput.focus();
+    });
+
+    this.dom.btnSubmitFirstTime.addEventListener('click', () => {
+      const name = this.dom.firstTimeNameInput.value.trim();
+      if (!name) {
+        this.showToast('Vui lòng nhập tên kỳ thủ của bạn!');
+        this.dom.firstTimeNameInput.focus();
+        return;
+      }
+      this.rankEngine.setName(name, this.selectedFirstTimeAvatar);
+      this.updateRankBadgeUI();
+      this.closeModal(this.dom.firstTimeModal);
+      this.startNewGame();
+      this.showToast(`Chào mừng ${name} đã gia nhập Đấu Trường Cờ Vua 3D!`);
+      this.triggerConfetti();
+    });
+
+    this.dom.firstTimeNameInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        this.dom.btnSubmitFirstTime.click();
+      }
+    });
+
+    // Profile Edit Modal Events
+    this.dom.userRankBadge.addEventListener('click', () => {
+      this.openProfileModal();
+    });
+
+    this.dom.btnCloseProfile.addEventListener('click', () => {
+      this.closeModal(this.dom.profileModal);
+    });
+
+    this.dom.profileAvatarOptions.forEach(btn => {
+      btn.addEventListener('click', () => {
+        this.dom.profileAvatarOptions.forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        this.selectedProfileAvatar = btn.getAttribute('data-avatar');
+      });
+    });
+
+    this.dom.btnProfileRandomName.addEventListener('click', () => {
+      const rand = SUGGESTED_NAMES[Math.floor(Math.random() * SUGGESTED_NAMES.length)];
+      this.dom.profileNameInput.value = rand;
+      this.dom.profileNameInput.focus();
+    });
+
+    this.dom.btnSaveProfile.addEventListener('click', () => {
+      const newName = this.dom.profileNameInput.value.trim();
+      if (newName) {
+        this.rankEngine.setName(newName, this.selectedProfileAvatar);
+        this.updateRankBadgeUI();
+        this.startNewGame();
+        this.closeModal(this.dom.profileModal);
+        this.showToast('Đã lưu thông tin kỳ thủ thành công!');
+      }
+    });
+
+    // Quick Difficulty Pills (Easy, Medium, Hard in PvE)
     this.dom.diffPills.forEach(pill => {
       pill.addEventListener('click', () => {
         const diff = pill.getAttribute('data-diff');
@@ -142,7 +365,87 @@ class ChessApp {
       });
     });
 
-    // Multiplayer Button & Room actions
+    // Ranked Matchmaking Button (PvP Online - KHÔNG ĐẤU VỚI AI)
+    this.dom.btnPlayRanked.addEventListener('click', () => {
+      this.openMatchmakingModal();
+    });
+
+    this.dom.btnCloseMatchmaking.addEventListener('click', () => {
+      this.closeMatchmakingModal();
+    });
+
+    this.dom.btnCancelMatchmaking.addEventListener('click', () => {
+      this.closeMatchmakingModal();
+      this.showToast('Đã hủy tìm trận đấu rank');
+    });
+
+    this.dom.btnCopyQueueLink.addEventListener('click', () => {
+      const p = this.rankEngine.profile;
+      const roomCode = this.network.generatedMatchRoomCode || NetworkEngine.generateRoomCode();
+      this.network.generatedMatchRoomCode = roomCode;
+      const url = `${window.location.origin}${window.location.pathname}?join_ranked=1&room=${roomCode}&name=${encodeURIComponent(p.name)}&avatar=${encodeURIComponent(p.avatar || '👑')}&tier=${p.tierIndex}&subTier=${p.subTier}&rp=${p.rp}`;
+      navigator.clipboard.writeText(url).then(() => {
+        this.showToast('Đã sao chép link tìm đối thủ PvP đồng hạng!');
+      }).catch(() => {
+        this.showToast(`Link mời: ${url}`);
+      });
+    });
+
+    // Leaderboard Modal
+    this.dom.btnLeaderboard.addEventListener('click', () => {
+      this.openLeaderboardModal();
+    });
+
+    this.dom.btnCloseLeaderboard.addEventListener('click', () => {
+      this.closeModal(this.dom.leaderboardModal);
+    });
+
+    // Honoring Top 3 Modal
+    this.dom.btnOpenHonoring.addEventListener('click', () => {
+      this.openHonoringModal();
+    });
+
+    this.dom.btnCloseHonoring.addEventListener('click', () => {
+      this.closeModal(this.dom.honoringModal);
+    });
+
+    // Challenge Top Modal
+    this.dom.btnCloseChallenge.addEventListener('click', () => {
+      this.closeModal(this.dom.challengeModal);
+    });
+
+    this.dom.btnCancelChallenge.addEventListener('click', () => {
+      this.closeModal(this.dom.challengeModal);
+    });
+
+    this.dom.btnSendChallenge.addEventListener('click', () => {
+      if (this.currentChallengeCandidate) {
+        this.sendChallenge(this.currentChallengeCandidate.rankPosition);
+      }
+    });
+
+    // Challenge Top buttons inside Leaderboard
+    document.querySelectorAll('.btn-challenge-top').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        const topNum = parseInt(e.currentTarget.getAttribute('data-top'), 10);
+        this.openChallengeModal(topNum);
+      });
+    });
+
+    // Unified Resign & Leave Room actions
+    this.dom.btnResign?.addEventListener('click', () => this.handlePlayerResign());
+    this.dom.btnResignRanked?.addEventListener('click', () => this.handlePlayerResign());
+    this.dom.btnResignMultiplayer?.addEventListener('click', () => this.handlePlayerResign());
+    this.dom.btnLeaveRanked?.addEventListener('click', () => this.handlePlayerLeaveRoom());
+    this.dom.btnLeaveRoom?.addEventListener('click', () => this.handlePlayerLeaveRoom());
+
+    // Ranked result modal close
+    this.dom.btnCloseRankedResult.addEventListener('click', () => {
+      this.closeModal(this.dom.rankedResultModal);
+      this.exitRankedMode();
+    });
+
+    // Multiplayer Modal
     this.dom.btnPlayFriend.addEventListener('click', () => {
       this.openMultiplayerModal('create');
     });
@@ -152,7 +455,6 @@ class ChessApp {
       this.dom.hostWaitingStatus.classList.add('hidden');
     });
 
-    // Tabs inside Multiplayer Modal
     this.dom.tabCreateRoom.addEventListener('click', () => {
       this.switchMultiplayerTab('create');
     });
@@ -160,12 +462,10 @@ class ChessApp {
       this.switchMultiplayerTab('join');
     });
 
-    // Copy Room Code Button
     this.dom.btnCopyCode.addEventListener('click', () => {
       this.copyRoomCode();
     });
 
-    // Color radio selection
     this.dom.radioCards.forEach(card => {
       card.addEventListener('click', () => {
         this.dom.radioCards.forEach(c => c.classList.remove('active'));
@@ -177,7 +477,7 @@ class ChessApp {
 
     // Start Hosting Button
     this.dom.btnStartHosting.addEventListener('click', () => {
-      const code = this.dom.displayRoomCode.textContent;
+      const code = this.dom.displayRoomCode.textContent.trim();
       const selectedColorInput = document.querySelector('input[name="host-color"]:checked');
       const hostColor = selectedColorInput ? selectedColorInput.value : 'w';
 
@@ -188,9 +488,14 @@ class ChessApp {
 
     // Join Room Button
     this.dom.btnSubmitJoin.addEventListener('click', () => {
-      const code = this.dom.joinCodeInput.value.trim().toUpperCase();
+      let raw = this.dom.joinCodeInput.value.trim().toUpperCase();
+      if (raw.includes('ROOM=')) {
+        raw = raw.split('ROOM=')[1].split('&')[0];
+      }
+      const code = raw.replace(/[^A-Z0-9]/g, '');
+
       if (!code || code.length < 4) {
-        this.showJoinError('Vui lòng nhập mã phòng hợp lệ!');
+        this.showJoinError('Vui lòng nhập mã phòng hợp lệ (VD: K9X2P7)!');
         return;
       }
       this.hideJoinError();
@@ -204,15 +509,8 @@ class ChessApp {
       }
     });
 
-    // Banner actions
     this.dom.btnCopyRoomLink.addEventListener('click', () => {
       this.copyRoomLink();
-    });
-
-    this.dom.btnLeaveRoom.addEventListener('click', () => {
-      if (confirm('Bạn có chắc muốn rời phòng đấu online không?')) {
-        this.leaveRoom();
-      }
     });
 
     // Top bar actions
@@ -250,11 +548,7 @@ class ChessApp {
     });
 
     this.dom.modeSelect.addEventListener('change', () => {
-      if (this.dom.modeSelect.value === 'pve') {
-        this.dom.difficultyRow.style.display = 'flex';
-      } else {
-        this.dom.difficultyRow.style.display = 'none';
-      }
+      this.dom.difficultyRow.style.display = this.dom.modeSelect.value === 'pve' ? 'flex' : 'none';
     });
 
     this.dom.btnApplySettings.addEventListener('click', () => {
@@ -268,7 +562,7 @@ class ChessApp {
       this.showToast('Đã áp dụng cài đặt!');
     });
 
-    // Camera preset buttons
+    // Camera presets
     document.querySelectorAll('.btn-pill[data-camera]').forEach(btn => {
       btn.addEventListener('click', () => {
         document.querySelectorAll('.btn-pill[data-camera]').forEach(b => b.classList.remove('active'));
@@ -283,10 +577,19 @@ class ChessApp {
     this.dom.btnHint.addEventListener('click', () => this.handleHint());
     this.dom.btnFlip.addEventListener('click', () => this.handleFlip());
     this.dom.btnRestart.addEventListener('click', () => {
-      if (confirm('Bạn có chắc muốn bắt đầu ván cờ mới không?')) {
-        if (this.mode === 'multiplayer') {
-          this.network.sendRematch();
+      if (this.mode === 'ranked' || this.mode === 'challenge') {
+        if (confirm('Bạn đang trong trận đấu Xếp Hạng. Thoát sẽ bị tính là đầu hàng! Bạn có chắc không?')) {
+          this.handleRankedGameEnd(this.playerColor === WHITE ? BLACK : WHITE, 'Đầu hàng trận xếp hạng');
         }
+        return;
+      }
+      if (this.mode === 'multiplayer') {
+        if (confirm('Bắt đầu ván mới và đổi màu quân với bạn bè?')) {
+          this.triggerMultiplayerRematch(true);
+        }
+        return;
+      }
+      if (confirm('Bạn có chắc muốn bắt đầu ván cờ mới không?')) {
         this.startNewGame();
       }
     });
@@ -294,9 +597,10 @@ class ChessApp {
     this.dom.btnPlayAgain.addEventListener('click', () => {
       this.closeModal(this.dom.gameoverModal);
       if (this.mode === 'multiplayer') {
-        this.network.sendRematch();
+        this.triggerMultiplayerRematch(true);
+      } else {
+        this.startNewGame();
       }
-      this.startNewGame();
     });
 
     // Promotion buttons
@@ -311,6 +615,388 @@ class ChessApp {
         }
       });
     });
+  }
+
+  // --- Profile Modal Flow ---
+  openProfileModal() {
+    this.dom.profileAvatarDisplay.textContent = this.rankEngine.profile.avatar || '👑';
+    this.dom.profileTierBadge.textContent = this.rankEngine.getRankDisplay();
+    this.dom.profileRpBadge.textContent = `${this.rankEngine.profile.rp} RP`;
+    this.dom.profileNameInput.value = this.rankEngine.profile.name;
+    this.selectedProfileAvatar = this.rankEngine.profile.avatar || '👑';
+
+    this.dom.profileAvatarOptions.forEach(btn => {
+      btn.classList.toggle('active', btn.getAttribute('data-avatar') === this.selectedProfileAvatar);
+    });
+
+    this.openModal(this.dom.profileModal);
+    setTimeout(() => this.dom.profileNameInput.focus(), 150);
+  }
+
+  // --- Real-Player Ranked PvP Matchmaking Flow (KHÔNG ĐẤU VỚI AI) ---
+  openMatchmakingModal(directInviteRoom = null) {
+    this.dom.matchmakingSearchingState.classList.remove('hidden');
+    this.dom.matchmakingFoundState.classList.add('hidden');
+
+    const tier = this.rankEngine.getCurrentTier();
+    this.dom.searchMyBadge.textContent = this.rankEngine.profile.avatar || tier.badge;
+    this.dom.searchMyRank.textContent = `Rank của bạn: ${this.rankEngine.getRankDisplay()} (${this.rankEngine.profile.rp} RP)`;
+
+    this.openModal(this.dom.rankedMatchmakingModal);
+    this.startRankedQueue(directInviteRoom);
+  }
+
+  closeMatchmakingModal() {
+    if (this.queueTimerInterval) {
+      clearInterval(this.queueTimerInterval);
+      this.queueTimerInterval = null;
+    }
+    this.network.cancelRankedMatchmaking();
+    this.closeModal(this.dom.rankedMatchmakingModal);
+  }
+
+  startRankedQueue(directInviteRoom = null) {
+    this.queueSeconds = 0;
+    this.dom.queueTimerDisplay.textContent = 'Thời gian chờ: 00:00';
+    if (this.queueTimerInterval) clearInterval(this.queueTimerInterval);
+
+    this.queueTimerInterval = setInterval(() => {
+      this.queueSeconds++;
+      const m = Math.floor(this.queueSeconds / 60).toString().padStart(2, '0');
+      const s = (this.queueSeconds % 60).toString().padStart(2, '0');
+      this.dom.queueTimerDisplay.textContent = `Thời gian chờ: ${m}:${s}`;
+    }, 1000);
+
+    // Call Real-Player Ranked PvP Queue
+    this.network.startRankedMatchmaking({
+      playerInfo: {
+        name: this.rankEngine.profile.name,
+        avatar: this.rankEngine.profile.avatar || '👑',
+        tierIndex: this.rankEngine.profile.tierIndex,
+        subTier: this.rankEngine.profile.subTier,
+        rp: this.rankEngine.profile.rp
+      },
+      directInviteRoomCode: directInviteRoom,
+      onMatchFound: ({ opponent, roomCode, myColor, isHost }) => {
+        clearInterval(this.queueTimerInterval);
+        this.queueTimerInterval = null;
+
+        this.currentOpponent = opponent;
+        this.playerColor = myColor;
+        this.rankedRoomCode = roomCode;
+
+        // Populate VS card
+        this.dom.vsMyAvatar.textContent = this.rankEngine.profile.avatar || '👑';
+        this.dom.vsMyName.textContent = `${this.rankEngine.profile.name} (Bạn)`;
+        this.dom.vsMyRank.textContent = this.rankEngine.getRankDisplay();
+        this.dom.vsMyRp.textContent = `${this.rankEngine.profile.rp} RP`;
+
+        const oppTier = RANK_TIERS[opponent.tierIndex] || RANK_TIERS[0];
+        this.dom.vsOppAvatar.textContent = opponent.avatar || '⚔️';
+        this.dom.vsOppName.textContent = opponent.name;
+        this.dom.vsOppRank.textContent = `${oppTier.name} ${opponent.subTier}`;
+        this.dom.vsOppRp.textContent = `${opponent.rp} RP`;
+
+        // Display Random Color Assignment
+        if (this.dom.vsMyColor && this.dom.vsOppColor) {
+          const myIsWhite = myColor === WHITE;
+          this.dom.vsMyColor.textContent = myIsWhite ? '⚪ Quân Trắng (Đi trước)' : '⚫ Quân Đen (Đi sau)';
+          this.dom.vsMyColor.style.background = myIsWhite ? 'rgba(255,255,255,0.18)' : 'rgba(15,23,42,0.6)';
+          this.dom.vsMyColor.style.color = myIsWhite ? '#f8fafc' : '#94a3b8';
+
+          this.dom.vsOppColor.textContent = myIsWhite ? '⚫ Quân Đen (Đi sau)' : '⚪ Quân Trắng (Đi trước)';
+          this.dom.vsOppColor.style.background = myIsWhite ? 'rgba(15,23,42,0.6)' : 'rgba(255,255,255,0.18)';
+          this.dom.vsOppColor.style.color = myIsWhite ? '#94a3b8' : '#f8fafc';
+        }
+
+        this.dom.matchmakingSearchingState.classList.add('hidden');
+        this.dom.matchmakingFoundState.classList.remove('hidden');
+        sound.playSelect();
+
+        let count = 3;
+        this.dom.matchCountdown.textContent = count;
+        const cd = setInterval(() => {
+          count--;
+          if (count <= 0) {
+            clearInterval(cd);
+            this.closeModal(this.dom.rankedMatchmakingModal);
+            this.startLiveRankedGame({ opponent, roomCode, myColor, isHost });
+          } else {
+            this.dom.matchCountdown.textContent = count;
+          }
+        }, 900);
+      },
+      onError: (err) => {
+        this.showToast(err);
+      }
+    });
+  }
+
+  startLiveRankedGame({ opponent, roomCode, myColor, isHost }) {
+    this.mode = 'ranked';
+    this.playerColor = myColor;
+    this.currentOpponent = opponent;
+    this.timeLimit = 600; // 10 minutes rapid
+
+    // Connect both real players in room
+    if (isHost) {
+      this.network.createRoom(roomCode, myColor, this.timeLimit);
+    } else {
+      this.network.joinRoom(roomCode);
+    }
+
+    // Set camera to player's perspective
+    this.chess3D.setCameraPreset(myColor === WHITE ? 'white' : 'black');
+    document.querySelectorAll('.btn-pill[data-camera]').forEach(b => {
+      b.classList.toggle('active', b.getAttribute('data-camera') === (myColor === WHITE ? 'white' : 'black'));
+    });
+
+    // Update Banner
+    const oppTier = RANK_TIERS[opponent.tierIndex] || RANK_TIERS[0];
+    this.dom.rankedMatchBanner.classList.remove('hidden');
+    this.dom.bannerModeTitle.textContent = `ĐẤU RANK PVP (${myColor === WHITE ? 'QUÂN TRẮNG ⚪' : 'QUÂN ĐEN ⚫'}):`;
+    this.dom.bannerMatchDesc.textContent = `${this.rankEngine.profile.name} vs ${opponent.name} (${oppTier.name} ${opponent.subTier})`;
+    this.dom.bannerStakesText.textContent = `Thắng: +25 RP | Thua: -${this.rankEngine.getCurrentTier().lossDeduction} RP`;
+
+    this.dom.quickDiffGroup.style.display = 'none';
+    this.dom.onlineRoomBanner.classList.add('hidden');
+
+    this.startNewGame();
+    const colorDesc = myColor === WHITE ? 'Trắng ⚪ (Đi trước)' : 'Đen ⚫ (Đi sau)';
+    this.showToast(`🎲 Ghép trận thành công! Bạn được random quân ${colorDesc}`);
+  }
+
+  exitRankedMode() {
+    this.mode = 'pve';
+    this.currentOpponent = null;
+    this.currentChallengeTop = null;
+    this.network.cleanup();
+    this.dom.rankedMatchBanner.classList.add('hidden');
+    this.dom.quickDiffGroup.style.display = 'flex';
+    this.chess3D.setCameraPreset('white');
+    this.startNewGame();
+  }
+
+  // --- Monthly Leaderboard Modal Flow ---
+  openLeaderboardModal() {
+    this.dom.lbMonthTitle.textContent = `BẢNG XẾP HẠNG ${this.rankEngine.currentMonthStr.toUpperCase()}`;
+    this.renderLeaderboard();
+    this.openModal(this.dom.leaderboardModal);
+  }
+
+  renderLeaderboard() {
+    const list = this.rankEngine.leaderboard;
+    const top3 = this.rankEngine.getTop3();
+
+    if (top3[0]) {
+      document.getElementById('podium-name-1').textContent = top3[0].name;
+      document.getElementById('podium-rank-1').textContent = this.rankEngine.getRankDisplay(top3[0].tierIndex, top3[0].subTier);
+      document.getElementById('podium-rp-1').textContent = `${top3[0].rp} RP`;
+      document.getElementById('podium-title-1').textContent = top3[0].monthlyTitle;
+    }
+
+    if (top3[1]) {
+      document.getElementById('podium-name-2').textContent = top3[1].name;
+      document.getElementById('podium-rank-2').textContent = this.rankEngine.getRankDisplay(top3[1].tierIndex, top3[1].subTier);
+      document.getElementById('podium-rp-2').textContent = `${top3[1].rp} RP`;
+      document.getElementById('podium-title-2').textContent = top3[1].monthlyTitle;
+    }
+
+    if (top3[2]) {
+      document.getElementById('podium-name-3').textContent = top3[2].name;
+      document.getElementById('podium-rank-3').textContent = this.rankEngine.getRankDisplay(top3[2].tierIndex, top3[2].subTier);
+      document.getElementById('podium-rp-3').textContent = `${top3[2].rp} RP`;
+      document.getElementById('podium-title-3').textContent = top3[2].monthlyTitle;
+    }
+
+    // Ranks 4+ Table
+    let tableHtml = '';
+    const otherRankers = list.slice(3);
+    for (const item of otherRankers) {
+      const rankTier = RANK_TIERS[item.tierIndex] || RANK_TIERS[0];
+      const isMe = item.isPlayer;
+
+      tableHtml += `
+        <tr class="${isMe ? 'lb-row-me' : ''}">
+          <td class="lb-rank-num">#${item.rankPosition}</td>
+          <td>
+            <div class="lb-player-cell">
+              <span>${item.avatar}</span>
+              <strong>${item.name}</strong>
+            </div>
+          </td>
+          <td>
+            <span class="lb-badge" style="color: ${rankTier.color}; border: 1px solid ${rankTier.color}40">
+              ${rankTier.badge} ${rankTier.name} ${item.subTier}
+            </span>
+          </td>
+          <td><strong>${item.rp}</strong> RP</td>
+          <td>${item.winrate}% (${item.wins}T - ${item.losses || 0}B)</td>
+          <td><em>${item.monthlyTitle}</em></td>
+        </tr>
+      `;
+    }
+
+    this.dom.lbTableBody.innerHTML = tableHtml;
+  }
+
+  // --- Monthly Top 3 Honoring Modal Flow ---
+  openHonoringModal() {
+    const top3 = this.rankEngine.getTop3();
+    let cardsHtml = '';
+    const medals = ['🥇', '🥈', '🥉'];
+    const titles = ['QUÁN QUÂN THÁNG', 'Á QUÂN THÁNG', 'QUÝ QUÂN THÁNG'];
+    const classes = ['top1', 'top2', 'top3'];
+
+    top3.forEach((item, idx) => {
+      const rankTier = RANK_TIERS[item.tierIndex] || RANK_TIERS[5];
+      cardsHtml += `
+        <div class="honoring-card ${classes[idx]}">
+          <div class="honoring-badge-pos">${medals[idx]} ${titles[idx]}</div>
+          <div style="font-size: 38px; margin: 6px 0;">${item.avatar}</div>
+          <div class="honoring-player-name">${item.name}</div>
+          <div class="honoring-player-rank">${rankTier.badge} ${rankTier.name} ${item.subTier} (${item.rp} RP)</div>
+          <div style="font-size: 11px; color: #4ade80; font-weight: 700; margin-bottom: 4px;">Tỉ Lệ Thắng: ${item.winrate}% (${item.wins} Thắng)</div>
+          <div class="honoring-player-title">"${item.monthlyTitle}"</div>
+        </div>
+      `;
+    });
+
+    this.dom.honoringTrioContainer.innerHTML = cardsHtml;
+    this.dom.honoringDescText.textContent = `Hội Đồng Cờ Vua 3D trân trọng vinh danh 3 kỳ thủ xuất sắc nhất ${this.rankEngine.currentMonthStr}!`;
+    this.openModal(this.dom.honoringModal);
+    this.triggerConfetti();
+  }
+
+  // --- Top 1-3 Challenge Flow ---
+  openChallengeModal(topRank) {
+    const candidate = this.rankEngine.getTopCandidate(topRank);
+    if (!candidate) return;
+
+    this.currentChallengeCandidate = candidate;
+    this.dom.chBossAvatar.textContent = candidate.avatar;
+    this.dom.chBossPos.textContent = `TOP ${topRank} BẢNG XẾP HẠNG THÁNG`;
+    this.dom.chBossName.textContent = candidate.name;
+    this.dom.chBossRank.textContent = `${this.rankEngine.getRankDisplay(candidate.tierIndex, candidate.subTier)} • ${candidate.rp} RP`;
+
+    const quotes = {
+      1: '"Ta là Quán Quân giữ đỉnh bảng tháng này. Ngươi có đủ bản lĩnh để lật đổ ngôi vương?"',
+      2: '"Kỳ nghệ của ta được rèn giũa qua hàng trăm trận chiến. Ngươi dám thách thức vị trí Á Quân?"',
+      3: '"Tốc độ và sự sắc bén là vũ khí của ta. Hãy chứng minh ngươi xứng đáng đứng vào Top 3!"'
+    };
+    this.dom.chBossQuote.textContent = quotes[topRank] || quotes[1];
+
+    this.dom.challengeDecisionStatus.classList.add('hidden');
+    this.dom.challengeActionsRow.classList.remove('hidden');
+    this.dom.btnSendChallenge.textContent = 'Gửi Lời Khiêu Chiến Ngay';
+    this.dom.btnSendChallenge.disabled = false;
+
+    this.openModal(this.dom.challengeModal);
+  }
+
+  sendChallenge(topRank) {
+    this.dom.challengeActionsRow.classList.add('hidden');
+    this.dom.challengeDecisionStatus.classList.remove('hidden');
+    this.dom.challengeStatusText.textContent = `Đang gửi thư khiêu chiến tới Top ${topRank} BXH...`;
+
+    setTimeout(() => {
+      const decision = this.rankEngine.evaluateChallenge(topRank);
+      if (decision.accepted) {
+        this.dom.challengeStatusText.innerHTML = `<span style="color: #4ade80;">✓ ĐÃ CHẤP NHẬN:</span> ${decision.quote}`;
+        sound.playVictory();
+        this.triggerConfetti();
+
+        setTimeout(() => {
+          this.closeModal(this.dom.challengeModal);
+          this.closeModal(this.dom.leaderboardModal);
+          this.startChallengeGame(decision.topPlayer);
+        }, 1800);
+      } else {
+        this.dom.challengeStatusText.innerHTML = `<span style="color: #f87171;">✕ TỪ CHỐI THÁCH ĐẤU:</span> ${decision.quote}`;
+        setTimeout(() => {
+          this.dom.challengeActionsRow.classList.remove('hidden');
+          this.dom.btnSendChallenge.textContent = 'Thử Gửi Lại Sau';
+          this.dom.btnSendChallenge.disabled = false;
+        }, 1500);
+      }
+    }, 1200);
+  }
+
+  startChallengeGame(topPlayer) {
+    this.mode = 'challenge';
+    this.currentChallengeTop = topPlayer.rankPosition;
+    this.playerColor = WHITE;
+    this.timeLimit = 600;
+
+    // Boss plays at Master Hard AI
+    this.ai.setDifficulty('hard');
+
+    // Update Subbar Banner
+    this.dom.rankedMatchBanner.classList.remove('hidden');
+    this.dom.bannerModeTitle.textContent = `THÁCH ĐẤU TOP ${topPlayer.rankPosition} BXH:`;
+    this.dom.bannerMatchDesc.textContent = `Bạn vs ${topPlayer.name} (${this.rankEngine.getRankDisplay(topPlayer.tierIndex, topPlayer.subTier)})`;
+    this.dom.bannerStakesText.innerHTML = `<span style="color: #4ade80;">THẮNG: Nhận Danh Hiệu Top BXH + 50 RP | THUA: Không mất điểm!</span>`;
+
+    this.dom.quickDiffGroup.style.display = 'none';
+    this.dom.onlineRoomBanner.classList.add('hidden');
+
+    this.startNewGame();
+    this.showToast(`BẮT ĐẦU TRẬN ĐẠI CHIẾN THÁCH ĐẤU TOP ${topPlayer.rankPosition} BXH!`);
+  }
+
+  handleRankedGameEnd(winnerColor, reason = '') {
+    const isWin = winnerColor === this.playerColor;
+    const isLoss = winnerColor !== null && winnerColor !== this.playerColor;
+    const outcome = isWin ? 'win' : isLoss ? 'loss' : 'draw';
+
+    const isChallenge = this.mode === 'challenge';
+    const result = this.rankEngine.recordMatchResult({
+      outcome,
+      isTopChallenge: isChallenge,
+      topId: this.currentChallengeTop,
+      opponentRank: this.currentOpponent?.name
+    });
+
+    this.updateRankBadgeUI();
+
+    // Show Ranked Result Modal
+    this.dom.resResultTitle.textContent = isWin ? 'CHIẾN THẮNG TRẬN RANK!' : isLoss ? 'THẤT BẠI TRẬN RANK!' : 'HÒA CỜ TRẬN RANK!';
+    this.dom.resResultDesc.textContent = reason || (isWin ? 'Bạn đã đánh bại đối thủ và tích lũy thêm điểm xếp hạng!' : isLoss ? 'Bạn đã thua trận đấu này.' : 'Ván cờ kết thúc hòa.');
+
+    if (result.rpChange > 0) {
+      this.dom.resRpChange.textContent = `+${result.rpChange} RP`;
+      this.dom.resRpChange.className = 'rp-diff';
+    } else if (result.rpChange < 0) {
+      this.dom.resRpChange.textContent = `${result.rpChange} RP`;
+      this.dom.resRpChange.className = 'rp-diff negative';
+    } else {
+      this.dom.resRpChange.textContent = `+0 RP (Bảo Vệ Điểm)`;
+      this.dom.resRpChange.className = 'rp-diff';
+    }
+
+    this.dom.resTierName.textContent = result.newRank;
+    this.dom.resRpCurrent.textContent = `${result.newRp} / 100 RP`;
+    this.dom.resProgressFill.style.width = `${Math.min(100, Math.max(5, result.newRp))}%`;
+
+    // Rank-up banner
+    if (result.rankUp) {
+      this.dom.resRankupBanner.classList.remove('hidden');
+      this.dom.resPromotedRank.textContent = result.newRank;
+      this.triggerConfetti();
+    } else {
+      this.dom.resRankupBanner.classList.add('hidden');
+    }
+
+    // Title Reward banner
+    if (result.specialReward) {
+      this.dom.resTitleBanner.classList.remove('hidden');
+      this.dom.resUnlockedTitle.textContent = `"${result.specialReward.title}"`;
+      this.triggerConfetti();
+    } else {
+      this.dom.resTitleBanner.classList.add('hidden');
+    }
+
+    this.openModal(this.dom.rankedResultModal);
   }
 
   // --- Difficulty Management ---
@@ -336,6 +1022,9 @@ class ChessApp {
     if (tab === 'create') {
       const newCode = NetworkEngine.generateRoomCode();
       this.dom.displayRoomCode.textContent = newCode;
+      const selectedColorInput = document.querySelector('input[name="host-color"]:checked');
+      const hostColor = selectedColorInput ? selectedColorInput.value : 'w';
+      this.network.createRoom(newCode, hostColor, this.timeLimit);
     }
     this.dom.hostWaitingStatus.classList.add('hidden');
     this.hideJoinError();
@@ -388,30 +1077,47 @@ class ChessApp {
   }
 
   // --- Network Event Handlers ---
-  handleNetworkConnected({ role, myColor, roomCode, opponentName }) {
-    this.mode = 'multiplayer';
-    this.playerColor = myColor;
+  handleNetworkConnected({ role, myColor, timeLimit, roomCode, opponentName }) {
     this.closeModal(this.dom.multiplayerModal);
     this.dom.hostWaitingStatus.classList.add('hidden');
-
-    // Update UI Elements
-    this.dom.roomCodeBadge.textContent = roomCode;
-    this.dom.myColorBadge.textContent = myColor === WHITE ? 'Trắng (White)' : 'Đen (Black)';
-    this.dom.onlineRoomBanner.classList.remove('hidden');
     this.dom.quickDiffGroup.style.display = 'none';
 
-    // Set camera to player's perspective
-    this.chess3D.setCameraPreset(myColor === WHITE ? 'white' : 'black');
-    document.querySelectorAll('.btn-pill[data-camera]').forEach(b => {
-      b.classList.toggle('active', b.getAttribute('data-camera') === (myColor === WHITE ? 'white' : 'black'));
-    });
+    if (this.mode !== 'ranked') {
+      this.mode = 'multiplayer';
+      this.playerColor = myColor;
+      if (timeLimit) this.timeLimit = timeLimit;
 
-    this.startNewGame();
-    this.showToast(`Đã kết nối với bạn bè! Bạn là quân ${myColor === WHITE ? 'Trắng' : 'Đen'}`);
+      // Update UI Elements
+      this.dom.roomCodeBadge.textContent = roomCode;
+      this.dom.myColorBadge.textContent = myColor === WHITE ? 'Trắng (White)' : 'Đen (Black)';
+      this.multiplayerMatchCount = 1;
+      if (this.dom.onlineMatchCountBadge) {
+        this.dom.onlineMatchCountBadge.textContent = 'Ván 1';
+      }
+
+      this.dom.onlineRoomBanner.classList.remove('hidden');
+
+      // Set camera to player's perspective
+      this.chess3D.setCameraPreset(myColor === WHITE ? 'white' : 'black');
+      document.querySelectorAll('.btn-pill[data-camera]').forEach(b => {
+        b.classList.toggle('active', b.getAttribute('data-camera') === (myColor === WHITE ? 'white' : 'black'));
+      });
+
+      this.startNewGame();
+      this.showToast(`Đã kết nối với đối thủ! Bạn là quân ${myColor === WHITE ? 'Trắng ⚪ (Đi trước)' : 'Đen ⚫ (Đi sau)'}`);
+    } else {
+      // In Ranked PvP, banner and board are already initialized with correct perspective
+      this.showToast(`Đã kết nối PvP thời gian thực với ${this.currentOpponent?.name || 'đối thủ'}!`);
+    }
   }
 
   handleNetworkDisconnected() {
-    this.showToast('Bạn bè đã ngắt kết nối!');
+    if (this.mode === 'ranked') {
+      sound.playVictory();
+      this.handleRankedGameEnd(this.playerColor, 'Đối thủ đã ngắt kết nối! Bạn giành chiến thắng.');
+    } else {
+      this.showToast('Đối thủ đã ngắt kết nối!');
+    }
   }
 
   handleRemoteMove(data) {
@@ -423,21 +1129,153 @@ class ChessApp {
     }
   }
 
-  handleRemoteRematch() {
+  handleRemoteRematch(data) {
+    if (this.mode === 'multiplayer') {
+      this.triggerMultiplayerRematch(false, data);
+    } else {
+      this.startNewGame();
+      this.showToast('Đối thủ đã bắt đầu ván mới!');
+    }
+  }
+
+  triggerMultiplayerRematch(isInitiator, data = null) {
+    let nextColor;
+    if (isInitiator) {
+      nextColor = this.playerColor === WHITE ? BLACK : WHITE;
+      this.playerColor = nextColor;
+      this.network.myColor = nextColor;
+      this.network.sendRematch(nextColor);
+    } else {
+      if (data && data.initiatorNewColor) {
+        nextColor = data.initiatorNewColor === WHITE ? BLACK : WHITE;
+      } else {
+        nextColor = this.playerColor === WHITE ? BLACK : WHITE;
+      }
+      this.playerColor = nextColor;
+      this.network.myColor = nextColor;
+    }
+
+    this.multiplayerMatchCount = (this.multiplayerMatchCount || 1) + 1;
+
+    // Update banner & badge
+    this.dom.myColorBadge.textContent = this.playerColor === WHITE ? 'Trắng' : 'Đen';
+    if (this.dom.onlineMatchCountBadge) {
+      this.dom.onlineMatchCountBadge.textContent = `Ván ${this.multiplayerMatchCount}`;
+    }
+
+    // Set camera to new perspective
+    this.chess3D.setCameraPreset(this.playerColor === WHITE ? 'white' : 'black');
+    document.querySelectorAll('.btn-pill[data-camera]').forEach(b => {
+      b.classList.toggle('active', b.getAttribute('data-camera') === (this.playerColor === WHITE ? 'white' : 'black'));
+    });
+
+    this.closeModal(this.dom.gameoverModal);
     this.startNewGame();
-    this.showToast('Đối thủ đã bắt đầu ván mới!');
+
+    const colorName = this.playerColor === WHITE ? 'Trắng ⚪ (Đi trước)' : 'Đen ⚫ (Đi sau)';
+    this.showToast(`🔄 ĐÃ ĐỔI QUÂN VÁN ${this.multiplayerMatchCount}: Bạn chuyển sang cầm quân ${colorName}!`);
+  }
+
+  handlePlayerResign() {
+    if (this.game.isCheckmate || this.game.isStalemate || this.game.isThreefoldRepetition || this.game.isFiftyMoveDraw) {
+      this.showToast('Ván cờ này đã kết thúc!');
+      return;
+    }
+
+    if (this.mode === 'ranked') {
+      if (confirm('Bạn có chắc muốn ĐẦU HÀNG trận đấu Xếp Hạng này không?\nBạn sẽ bị xử thua và trừ điểm RP.')) {
+        this.network.sendResign();
+        this.handleRankedGameEnd(this.playerColor === WHITE ? BLACK : WHITE, 'Bạn đã đầu hàng ván đấu xếp hạng.');
+      }
+    } else if (this.mode === 'multiplayer') {
+      if (confirm('Bạn có chắc muốn ĐẦU HÀNG ván cờ này với bạn bè không?')) {
+        this.network.sendResign();
+        const opponentColor = this.playerColor === WHITE ? BLACK : WHITE;
+        const opponentName = opponentColor === WHITE ? 'Trắng (Bạn bè)' : 'Đen (Bạn bè)';
+        sound.playVictory();
+        this.showGameOver('BẠN ĐÃ ĐẦU HÀNG!', `Quân ${opponentName} giành chiến thắng ván này.`);
+      }
+    } else if (this.mode === 'challenge') {
+      if (confirm('Bạn có chắc muốn đầu hàng ván khiêu chiến này không?\n(Bạn được bảo lưu điểm, không bị trừ RP)')) {
+        this.handleRankedGameEnd(BLACK, 'Bạn đã đầu hàng ván khiêu chiến.');
+      }
+    } else if (this.mode === 'pve') {
+      if (confirm('Bạn có chắc muốn đầu hàng máy AI không?')) {
+        sound.playVictory();
+        this.showGameOver('BẠN ĐÃ ĐẦU HÀNG!', 'AI máy giành chiến thắng ván này.');
+      }
+    } else {
+      // Local PvP
+      const currentTurnName = this.game.turn === WHITE ? 'Trắng' : 'Đen';
+      const winnerName = this.game.turn === WHITE ? 'Đen' : 'Trắng';
+      if (confirm(`Quân ${currentTurnName} có chắc muốn đầu hàng không?`)) {
+        sound.playVictory();
+        this.showGameOver('ĐẦU HÀNG!', `Quân ${winnerName} giành chiến thắng do đối thủ đầu hàng.`);
+      }
+    }
+  }
+
+  handlePlayerLeaveRoom() {
+    if (this.mode === 'ranked') {
+      const matchActive = !this.game.isCheckmate && !this.game.isStalemate && !this.game.isThreefoldRepetition && this.game.history.length > 0;
+      const msg = matchActive 
+        ? 'Bạn đang trong trận Đấu Rank!\nRời phòng bây giờ sẽ bị xử thua trận và trừ điểm RP.\nBạn có chắc chắn muốn rời phòng không?'
+        : 'Bạn có chắc muốn rời phòng Đấu Rank và trở về sảnh chính không?';
+      if (confirm(msg)) {
+        if (matchActive) {
+          this.network.sendResign();
+          this.rankEngine.recordMatchResult({
+            outcome: 'loss',
+            isTopChallenge: false,
+            opponentRank: this.currentOpponent?.name
+          });
+          this.updateRankBadgeUI();
+        }
+        this.network.sendPlayerLeft();
+        this.exitRankedMode();
+        this.showToast('Đã rời khỏi phòng Đấu Rank');
+      }
+    } else if (this.mode === 'multiplayer') {
+      if (confirm('Bạn có chắc muốn rời khỏi phòng đấu online với bạn bè không?')) {
+        this.network.sendPlayerLeft();
+        this.leaveRoom();
+        this.showToast('Đã rời khỏi phòng đấu online');
+      }
+    } else if (this.mode === 'challenge') {
+      if (confirm('Bạn có chắc muốn rời khỏi ván khiêu chiến không?')) {
+        this.exitRankedMode();
+        this.showToast('Đã rời khỏi ván khiêu chiến');
+      }
+    } else {
+      this.showToast('Bạn đang ở chế độ chơi bình thường');
+    }
   }
 
   handleRemoteResign() {
-    const winner = this.playerColor === WHITE ? 'Trắng (Bạn)' : 'Đen (Bạn)';
     sound.playVictory();
-    this.showGameOver('ĐỐI THỦ ĐẦU HÀNG!', `Quân ${winner} giành chiến thắng!`);
+    if (this.mode === 'ranked') {
+      this.handleRankedGameEnd(this.playerColor, 'Đối thủ đã đầu hàng! Bạn giành chiến thắng!');
+    } else {
+      const winner = this.playerColor === WHITE ? 'Trắng (Bạn)' : 'Đen (Bạn)';
+      this.showGameOver('ĐỐI THỦ ĐẦU HÀNG!', `Quân ${winner} giành chiến thắng!`);
+    }
+  }
+
+  handleRemotePlayerLeft() {
+    sound.playVictory();
+    if (this.mode === 'ranked') {
+      this.handleRankedGameEnd(this.playerColor, 'Đối thủ đã rời khỏi phòng đấu! Bạn giành chiến thắng.');
+    } else if (this.mode === 'multiplayer') {
+      this.showGameOver('ĐỐI THỦ ĐÃ RỜI PHÒNG!', 'Bạn bè của bạn đã rời khỏi phòng đấu online.');
+      this.showToast('Đối thủ đã rời phòng đấu online');
+    }
   }
 
   leaveRoom() {
     this.network.cleanup();
     this.mode = 'pve';
     this.playerColor = WHITE;
+    this.multiplayerMatchCount = 1;
     this.dom.onlineRoomBanner.classList.add('hidden');
     this.dom.quickDiffGroup.style.display = 'flex';
     this.chess3D.setCameraPreset('white');
@@ -462,17 +1300,32 @@ class ChessApp {
     this.timers[BLACK] = this.timeLimit;
     this.startClocks();
 
+    const playerName = this.rankEngine.profile.name || 'Bạn';
+
     // Update UI Names
     if (this.mode === 'multiplayer') {
       if (this.playerColor === WHITE) {
-        this.dom.whiteNameLabel.textContent = 'Bạn (Trắng)';
+        this.dom.whiteNameLabel.textContent = `${playerName} (Trắng)`;
         this.dom.blackNameLabel.textContent = 'Bạn bè (Đen)';
       } else {
         this.dom.whiteNameLabel.textContent = 'Bạn bè (Trắng)';
-        this.dom.blackNameLabel.textContent = 'Bạn (Đen)';
+        this.dom.blackNameLabel.textContent = `${playerName} (Đen)`;
       }
+    } else if (this.mode === 'ranked') {
+      const oppName = this.currentOpponent?.name || 'Đối thủ PvP';
+      if (this.playerColor === WHITE) {
+        this.dom.whiteNameLabel.textContent = `${playerName} (Bạn - Trắng)`;
+        this.dom.blackNameLabel.textContent = `${oppName} (Đen)`;
+      } else {
+        this.dom.whiteNameLabel.textContent = `${oppName} (Trắng)`;
+        this.dom.blackNameLabel.textContent = `${playerName} (Bạn - Đen)`;
+      }
+    } else if (this.mode === 'challenge') {
+      this.dom.whiteNameLabel.textContent = `${playerName} (Bạn - Trắng)`;
+      const boss = this.rankEngine.getTopCandidate(this.currentChallengeTop || 1);
+      this.dom.blackNameLabel.textContent = `👑 Top ${this.currentChallengeTop || 1}: ${boss ? boss.name : 'Cao Thủ'}`;
     } else if (this.mode === 'pve') {
-      this.dom.whiteNameLabel.textContent = 'Bạn (Trắng)';
+      this.dom.whiteNameLabel.textContent = `${playerName} (Trắng)`;
       const diffText = { easy: 'Dễ', medium: 'Vừa', hard: 'Khó' };
       this.dom.blackNameLabel.textContent = `AI Máy (${diffText[this.ai.difficulty]})`;
     } else {
@@ -499,7 +1352,7 @@ class ChessApp {
     }
 
     this.timerInterval = setInterval(() => {
-      if (this.game.isCheckmate || this.game.isStalemate) return;
+      if (this.game.isCheckmate || this.game.isStalemate || this.game.isThreefoldRepetition || this.game.isFiftyMoveDraw || this.game.isInsufficientMaterial) return;
 
       const currentTurn = this.game.turn;
       this.timers[currentTurn]--;
@@ -533,28 +1386,30 @@ class ChessApp {
   }
 
   handleTimeOut(loserColor) {
-    const winner = loserColor === WHITE ? 'Đen' : 'Trắng';
+    const winner = loserColor === WHITE ? BLACK : WHITE;
+    const winnerName = winner === WHITE ? 'Trắng' : 'Đen';
     sound.playVictory();
-    this.showGameOver(`HẾT GIỜ!`, `Quân ${winner} chiến thắng do đối thủ hết thời gian.`);
+
+    if (this.mode === 'ranked' || this.mode === 'challenge') {
+      this.handleRankedGameEnd(winner, `Đối thủ hết thời gian! Quân ${winnerName} chiến thắng!`);
+    } else {
+      this.showGameOver(`HẾT GIỜ!`, `Quân ${winnerName} chiến thắng do đối thủ hết thời gian.`);
+    }
   }
 
   onHoverSquare(square) {
-    // Optional additional tooltip
+    // Tooltip
   }
 
   onSquareClicked(r, c, pieceData, directMove = null) {
-    // Block moves if it's not the player's turn
-    if (this.mode === 'pve' && this.game.turn !== this.playerColor) {
+    // Block moves if it's not the player's turn in PvE, Ranked PvP, or Challenge
+    if ((this.mode === 'pve' || this.mode === 'ranked' || this.mode === 'challenge' || this.mode === 'multiplayer') && this.game.turn !== this.playerColor) {
       return;
     }
-    if (this.mode === 'multiplayer' && this.game.turn !== this.playerColor) {
-      return;
-    }
-    if (this.game.isCheckmate || this.game.isStalemate || this.isAiThinking) {
+    if (this.game.isCheckmate || this.game.isStalemate || this.game.isThreefoldRepetition || this.game.isFiftyMoveDraw || this.isAiThinking) {
       return;
     }
 
-    // Direct move clicked via legal destination marker
     if (directMove) {
       this.handlePlayerMove(directMove);
       return;
@@ -562,7 +1417,6 @@ class ChessApp {
 
     const clickedPiece = this.game.getPiece(r, c);
 
-    // 1. If piece is currently selected:
     if (this.selectedSquare) {
       const matchingMove = this.legalMovesForSelected.find(
         m => m.to.r === r && m.to.c === c
@@ -573,9 +1427,8 @@ class ChessApp {
         return;
       }
 
-      // If clicked another own piece: switch selection
       if (clickedPiece && clickedPiece.color === this.game.turn) {
-        if (this.mode === 'multiplayer' && clickedPiece.color !== this.playerColor) return;
+        if ((this.mode === 'multiplayer' || this.mode === 'ranked') && clickedPiece.color !== this.playerColor) return;
         this.selectSquare(r, c);
         return;
       }
@@ -584,9 +1437,8 @@ class ChessApp {
       return;
     }
 
-    // 2. No piece selected yet:
     if (clickedPiece && clickedPiece.color === this.game.turn) {
-      if (this.mode === 'multiplayer' && clickedPiece.color !== this.playerColor) return;
+      if ((this.mode === 'multiplayer' || this.mode === 'ranked') && clickedPiece.color !== this.playerColor) return;
       this.selectSquare(r, c);
     }
   }
@@ -609,7 +1461,6 @@ class ChessApp {
   handlePlayerMove(move) {
     this.deselectSquare();
 
-    // Check if move is a pawn promotion
     if (move.piece.type === 'p' && (move.to.r === 0 || move.to.r === 7)) {
       this.pendingPromotionMove = move;
       this.openModal(this.dom.promotionModal);
@@ -623,15 +1474,13 @@ class ChessApp {
     const isCapture = !!move.capture || move.isEnPassant;
     const isCastle = move.isCastle;
 
-    // Send move over network if in multiplayer and locally initiated
-    if (this.mode === 'multiplayer' && !isRemote) {
+    // Send move over network in both Multiplayer room and Ranked PvP
+    if ((this.mode === 'multiplayer' || this.mode === 'ranked') && !isRemote) {
       this.network.sendMove(move, promotionChoice);
     }
 
-    // Apply move in game logic
     const moveResult = this.game.makeMove(move, promotionChoice);
 
-    // Play sound
     if (isCastle) {
       sound.playCastle();
     } else if (isCapture) {
@@ -640,10 +1489,8 @@ class ChessApp {
       sound.playMove();
     }
 
-    // Highlight last move
     this.chess3D.board.setLastMove(move.from, move.to);
 
-    // 3D Piece Animation
     this.chess3D.animateMove(move, () => {
       this.onMoveFinished(moveResult);
     });
@@ -670,26 +1517,66 @@ class ChessApp {
 
     // Checkmate
     if (this.game.isCheckmate) {
-      const winner = this.game.turn === WHITE ? 'Đen' : 'Trắng';
+      const winner = this.game.turn === WHITE ? BLACK : WHITE;
+      const winnerName = winner === WHITE ? 'Trắng' : 'Đen';
       sound.playVictory();
       this.triggerConfetti();
-      this.showGameOver('CHIẾU BÍ!', `Quân ${winner} đã giành chiến thắng ngoạn mục!`);
+
+      if (this.mode === 'ranked' || this.mode === 'challenge') {
+        this.handleRankedGameEnd(winner, `Chiếu bí ngoạn mục! Quân ${winnerName} chiến thắng!`);
+      } else {
+        this.showGameOver('CHIẾU BÍ!', `Quân ${winnerName} đã giành chiến thắng ngoạn mục!`);
+      }
+      return;
+    }
+
+    // Threefold Repetition Draw
+    if (moveResult.isThreefoldRepetition) {
+      if (this.mode === 'ranked' || this.mode === 'challenge') {
+        this.handleRankedGameEnd(null, 'Hòa cờ do thế cờ lặp lại 3 lần (Threefold Repetition).');
+      } else {
+        this.showGameOver('HÒA CỜ - LẶP NƯỚC 3 LẦN!', 'Ván cờ kết thúc hòa do lặp lại một thế cờ 3 lần (Threefold Repetition).');
+      }
+      return;
+    }
+
+    // 50-move rule Draw
+    if (moveResult.isFiftyMoveDraw) {
+      if (this.mode === 'ranked' || this.mode === 'challenge') {
+        this.handleRankedGameEnd(null, 'Hòa cờ theo luật 50 nước không ăn quân.');
+      } else {
+        this.showGameOver('HÒA CỜ - LUẬT 50 NƯỚC!', '50 nước đi liên tiếp không có tốt di chuyển hoặc quân bị ăn.');
+      }
+      return;
+    }
+
+    // Insufficient Material Draw
+    if (moveResult.isInsufficientMaterial) {
+      if (this.mode === 'ranked' || this.mode === 'challenge') {
+        this.handleRankedGameEnd(null, 'Hòa cờ do cả hai bên không đủ lực lượng chiếu bí.');
+      } else {
+        this.showGameOver('HÒA CỜ - THIẾU LỰC LƯỢNG!', 'Cả hai bên không còn đủ quân để chiếu bí đối phương.');
+      }
       return;
     }
 
     // Stalemate
     if (this.game.isStalemate) {
-      this.showGameOver('HÒA CỜ!', 'Ván cờ kết thúc hòa do hết nước đi hợp lệ (Stalemate).');
+      if (this.mode === 'ranked' || this.mode === 'challenge') {
+        this.handleRankedGameEnd(null, 'Hòa cờ do hết nước đi hợp lệ (Stalemate).');
+      } else {
+        this.showGameOver('HÒA CỜ!', 'Ván cờ kết thúc hòa do hết nước đi hợp lệ (Stalemate).');
+      }
       return;
     }
 
-    // Auto-flip camera in PvP mode if enabled
+    // Auto-flip in local PvP
     if (this.mode === 'pvp' && this.autoFlip) {
       this.chess3D.setCameraPreset(this.game.turn === WHITE ? 'white' : 'black');
     }
 
-    // Trigger AI move if it's AI's turn
-    if (this.mode === 'pve' && this.game.turn === BLACK) {
+    // Trigger AI move ONLY for PvE and Challenge mode (Ranked is 100% human PvP!)
+    if ((this.mode === 'pve' || this.mode === 'challenge') && this.game.turn === BLACK) {
       this.triggerAiTurn();
     }
   }
@@ -697,18 +1584,30 @@ class ChessApp {
   triggerAiTurn() {
     this.isAiThinking = true;
     const diffNames = { easy: 'Dễ', medium: 'Vừa', hard: 'Khó' };
-    this.dom.blackNameLabel.textContent = `AI (${diffNames[this.ai.difficulty]}) đang suy nghĩ...`;
+    
+    if (this.mode === 'challenge') {
+      this.dom.blackNameLabel.textContent = `👑 Top BXH đang tính toán...`;
+    } else {
+      this.dom.blackNameLabel.textContent = `AI (${diffNames[this.ai.difficulty]}) đang suy nghĩ...`;
+    }
 
-    const thinkDelay = this.ai.difficulty === 'hard' ? 450 : this.ai.difficulty === 'medium' ? 300 : 180;
+    const thinkDelay = this.ai.difficulty === 'hard' ? 420 : this.ai.difficulty === 'medium' ? 280 : 160;
 
     setTimeout(() => {
-      if (this.game.turn !== BLACK || this.game.isCheckmate || this.game.isStalemate) {
+      if (this.game.turn !== BLACK || this.game.isCheckmate || this.game.isStalemate || this.game.isThreefoldRepetition) {
         this.isAiThinking = false;
         return;
       }
 
       const bestMove = this.ai.getBestMove(this.game);
-      this.dom.blackNameLabel.textContent = `AI Máy (${diffNames[this.ai.difficulty]})`;
+
+      if (this.mode === 'challenge') {
+        const boss = this.rankEngine.getTopCandidate(this.currentChallengeTop || 1);
+        this.dom.blackNameLabel.textContent = `👑 Top ${this.currentChallengeTop}: ${boss ? boss.name : 'Cao Thủ'}`;
+      } else {
+        this.dom.blackNameLabel.textContent = `AI Máy (${diffNames[this.ai.difficulty]})`;
+      }
+
       this.isAiThinking = false;
 
       if (bestMove) {
@@ -718,8 +1617,8 @@ class ChessApp {
   }
 
   handleUndo() {
-    if (this.mode === 'multiplayer') {
-      this.showToast('Không thể đi lại khi đang đấu online!');
+    if (this.mode === 'multiplayer' || this.mode === 'ranked' || this.mode === 'challenge') {
+      this.showToast('Không thể đi lại khi đang thi đấu Rank hoặc Online!');
       return;
     }
     if (this.game.history.length === 0 || this.isAiThinking) return;
@@ -762,7 +1661,11 @@ class ChessApp {
   }
 
   handleHint() {
-    if (this.isAiThinking || this.game.isCheckmate || this.game.isStalemate) return;
+    if (this.mode === 'ranked' || this.mode === 'multiplayer') {
+      this.showToast('Không thể xem gợi ý trong trận đấu trực tuyến!');
+      return;
+    }
+    if (this.isAiThinking || this.game.isCheckmate || this.game.isStalemate || this.game.isThreefoldRepetition) return;
 
     const hintMove = this.ai.getBestMove(this.game);
     if (!hintMove) {
@@ -805,9 +1708,7 @@ class ChessApp {
       this.dom.advantagePill.className = 'advantage-pill';
     }
 
-    const pieceIcons = {
-      p: '♙', n: '♘', b: '♗', r: '♖', q: '♕', k: '♔'
-    };
+    const pieceIcons = { p: '♙', n: '♘', b: '♗', r: '♖', q: '♕', k: '♔' };
     
     const capturedByWhite = this.game.capturedPieces[WHITE]
       .map(p => pieceIcons[p.type] || '')
@@ -856,7 +1757,7 @@ class ChessApp {
     clearTimeout(this.toastTimeout);
     this.toastTimeout = setTimeout(() => {
       this.dom.toast.classList.add('hidden');
-    }, 2400);
+    }, 2500);
   }
 
   showGameOver(title, desc) {
@@ -865,6 +1766,21 @@ class ChessApp {
     document.getElementById('gameover-stats').innerHTML = `
       <span>Tổng số nước đi: <strong>${this.game.history.length}</strong></span>
     `;
+
+    if (this.mode === 'multiplayer') {
+      const nextColorName = this.playerColor === WHITE ? 'Đen ⚫ (Đi sau)' : 'Trắng ⚪ (Đi trước)';
+      if (this.dom.gameoverNextRoundInfo && this.dom.gameoverSwapText) {
+        this.dom.gameoverSwapText.textContent = `🔄 Ván sau sẽ tự động đổi quân: Bạn sẽ chuyển sang cầm quân ${nextColorName}!`;
+        this.dom.gameoverNextRoundInfo.classList.remove('hidden');
+      }
+      this.dom.btnPlayAgain.textContent = '🔄 Đổi Quân & Chơi Ván Mới';
+    } else {
+      if (this.dom.gameoverNextRoundInfo) {
+        this.dom.gameoverNextRoundInfo.classList.add('hidden');
+      }
+      this.dom.btnPlayAgain.textContent = 'Chơi Ván Mới';
+    }
+
     this.openModal(this.dom.gameoverModal);
   }
 
@@ -889,17 +1805,15 @@ class ChessApp {
           origin: { x: 1 }
         });
       }, 300);
-    } catch (e) {
-      // Confetti fallback
-    }
+    } catch (e) {}
   }
 
   openModal(modal) {
-    modal.classList.remove('hidden');
+    if (modal) modal.classList.remove('hidden');
   }
 
   closeModal(modal) {
-    modal.classList.add('hidden');
+    if (modal) modal.classList.add('hidden');
   }
 }
 

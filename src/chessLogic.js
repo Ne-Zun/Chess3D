@@ -95,8 +95,83 @@ export class ChessGame {
     this.isCheck = false;
     this.isCheckmate = false;
     this.isStalemate = false;
+    this.isThreefoldRepetition = false;
+    this.isFiftyMoveDraw = false;
+    this.isInsufficientMaterial = false;
+    this.halfMoveClock = 0; // For 50-move rule
+    this.positionHistory = new Map(); // Canonical FEN-like signatures -> occurrence count
     this.capturedPieces = { [WHITE]: [], [BLACK]: [] };
     this.setupStartingPosition();
+  }
+
+  getBoardSignature() {
+    let pieceStr = '';
+    for (let r = 0; r < 8; r++) {
+      let empty = 0;
+      for (let c = 0; c < 8; c++) {
+        const p = this.board[r][c];
+        if (!p) {
+          empty++;
+        } else {
+          if (empty > 0) {
+            pieceStr += empty;
+            empty = 0;
+          }
+          pieceStr += p.color === WHITE ? p.type.toUpperCase() : p.type.toLowerCase();
+        }
+      }
+      if (empty > 0) pieceStr += empty;
+      if (r < 7) pieceStr += '/';
+    }
+
+    // Castling rights signature
+    let castling = '';
+    const wk = this.board[7][4];
+    if (wk && wk.type === 'k' && !wk.hasMoved) {
+      const rk = this.board[7][7];
+      if (rk && rk.type === 'r' && !rk.hasMoved) castling += 'K';
+      const rq = this.board[7][0];
+      if (rq && rq.type === 'r' && !rq.hasMoved) castling += 'Q';
+    }
+    const bk = this.board[0][4];
+    if (bk && bk.type === 'k' && !bk.hasMoved) {
+      const rk = this.board[0][7];
+      if (rk && rk.type === 'r' && !rk.hasMoved) castling += 'k';
+      const rq = this.board[0][0];
+      if (rq && rq.type === 'r' && !rq.hasMoved) castling += 'q';
+    }
+    if (!castling) castling = '-';
+
+    const ep = this.enPassantTarget ? `${this.enPassantTarget.row},${this.enPassantTarget.col}` : '-';
+    return `${pieceStr} ${this.turn} ${castling} ${ep}`;
+  }
+
+  checkInsufficientMaterial() {
+    let whitePieces = [];
+    let blackPieces = [];
+
+    for (let r = 0; r < 8; r++) {
+      for (let c = 0; c < 8; c++) {
+        const p = this.board[r][c];
+        if (p) {
+          if (p.color === WHITE) whitePieces.push(p.type);
+          else blackPieces.push(p.type);
+        }
+      }
+    }
+
+    // King vs King
+    if (whitePieces.length === 1 && blackPieces.length === 1) return true;
+
+    // King + Bishop vs King or King + Knight vs King
+    if (
+      (whitePieces.length === 1 && blackPieces.length === 2 && (blackPieces.includes('b') || blackPieces.includes('n'))) ||
+      (blackPieces.length === 1 && whitePieces.length === 2 && (whitePieces.includes('b') || whitePieces.includes('n')))
+    ) {
+      return true;
+    }
+
+    return false;
   }
 
   clone() {
@@ -108,6 +183,11 @@ export class ChessGame {
     cloneGame.isCheck = this.isCheck;
     cloneGame.isCheckmate = this.isCheckmate;
     cloneGame.isStalemate = this.isStalemate;
+    cloneGame.isThreefoldRepetition = this.isThreefoldRepetition;
+    cloneGame.isFiftyMoveDraw = this.isFiftyMoveDraw;
+    cloneGame.isInsufficientMaterial = this.isInsufficientMaterial;
+    cloneGame.halfMoveClock = this.halfMoveClock;
+    cloneGame.positionHistory = new Map(this.positionHistory);
     cloneGame.capturedPieces = {
       [WHITE]: [...this.capturedPieces[WHITE]],
       [BLACK]: [...this.capturedPieces[BLACK]]
@@ -137,6 +217,10 @@ export class ChessGame {
       this.board[7][c] = { type: backRank[c], color: WHITE, hasMoved: false, id: `w_${backRank[c]}_${c}` };
     }
 
+    this.positionHistory.clear();
+    const startSig = this.getBoardSignature();
+    this.positionHistory.set(startSig, 1);
+    this.halfMoveClock = 0;
     this.updateGameStatus();
   }
 
@@ -575,12 +659,24 @@ export class ChessGame {
       this.enPassantTarget = null;
     }
 
+    // 50-move rule halfmove clock tracking
+    if (piece.type === 'p' || captured) {
+      this.halfMoveClock = 0;
+    } else {
+      this.halfMoveClock++;
+    }
+
     // Switch turn
     const prevTurn = this.turn;
     this.turn = this.turn === WHITE ? BLACK : WHITE;
     if (this.turn === WHITE) {
       this.moveCount++;
     }
+
+    // Update position history map
+    const sig = this.getBoardSignature();
+    const count = (this.positionHistory.get(sig) || 0) + 1;
+    this.positionHistory.set(sig, count);
 
     // Update status
     this.updateGameStatus();
@@ -600,6 +696,10 @@ export class ChessGame {
       isCheck: this.isCheck,
       isCheckmate: this.isCheckmate,
       isStalemate: this.isStalemate,
+      isThreefoldRepetition: this.isThreefoldRepetition,
+      isFiftyMoveDraw: this.isFiftyMoveDraw,
+      isInsufficientMaterial: this.isInsufficientMaterial,
+      isDraw: this.isStalemate || this.isThreefoldRepetition || this.isFiftyMoveDraw || this.isInsufficientMaterial,
       captured
     };
   }
@@ -617,6 +717,29 @@ export class ChessGame {
     } else {
       this.isCheckmate = false;
       this.isStalemate = false;
+    }
+
+    // Check threefold repetition
+    const sig = this.getBoardSignature();
+    const count = this.positionHistory.get(sig) || 0;
+    if (count >= 3) {
+      this.isThreefoldRepetition = true;
+    } else {
+      this.isThreefoldRepetition = false;
+    }
+
+    // Check 50-move rule (100 half-moves)
+    if (this.halfMoveClock >= 100) {
+      this.isFiftyMoveDraw = true;
+    } else {
+      this.isFiftyMoveDraw = false;
+    }
+
+    // Check insufficient material
+    if (this.checkInsufficientMaterial()) {
+      this.isInsufficientMaterial = true;
+    } else {
+      this.isInsufficientMaterial = false;
     }
   }
 
@@ -641,7 +764,7 @@ export class ChessGame {
     if (this.isCheckmate) {
       return this.turn === WHITE ? -999999 : 999999;
     }
-    if (this.isStalemate) {
+    if (this.isStalemate || this.isThreefoldRepetition || this.isFiftyMoveDraw || this.isInsufficientMaterial) {
       return 0;
     }
 
@@ -686,31 +809,100 @@ export class ChessAI {
     this.difficulty = level;
   }
 
+  // Calculate repetition / oscillation penalty to strictly prevent repeating moves
+  calculateRepetitionPenalty(game, move) {
+    let penalty = 0;
+    const currentTurn = game.turn;
+
+    // 1. Direct Ping-Pong: Immediately undoing AI's last move with the same piece
+    if (game.history.length >= 2) {
+      const lastOwnMove = game.history[game.history.length - 2];
+      if (lastOwnMove && lastOwnMove.turn === currentTurn) {
+        const isSamePiece = lastOwnMove.piece.type === move.piece.type;
+        const isExactReturn = (
+          lastOwnMove.from.r === move.to.r &&
+          lastOwnMove.from.c === move.to.c &&
+          lastOwnMove.to.r === move.from.r &&
+          lastOwnMove.to.c === move.from.c
+        );
+        if (isSamePiece && isExactReturn) {
+          // If not capturing, checking, or promoting, apply severe ping-pong penalty
+          if (!move.capture && !move.isEnPassant && !move.promotion) {
+            penalty += 280;
+          }
+        }
+      }
+    }
+
+    // 2. Oscillation loop: repeated move across last 4 turns
+    if (game.history.length >= 4) {
+      const pastOwnMove2 = game.history[game.history.length - 4];
+      if (pastOwnMove2 && pastOwnMove2.turn === currentTurn) {
+        if (
+          pastOwnMove2.to.r === move.to.r && pastOwnMove2.to.c === move.to.c &&
+          pastOwnMove2.from.r === move.from.r && pastOwnMove2.from.c === move.from.c
+        ) {
+          penalty += 350;
+        }
+      }
+    }
+
+    // 3. Board signature repetition against game history
+    const clone = game.clone();
+    clone.makeMove(move, 'q');
+    const nextSig = clone.getBoardSignature();
+    const occurrences = game.positionHistory.get(nextSig) || 0;
+
+    if (occurrences >= 2) {
+      // 3-fold repetition (draw!)
+      const currentScore = game.evaluate();
+      const isAiAhead = currentTurn === WHITE ? currentScore > -150 : currentScore < 150;
+      if (isAiAhead) {
+        // AI is ahead or equal: refuse to accept an accidental draw by repetition!
+        penalty += 1200;
+      } else {
+        // AI is losing badly, but avoid mindless endless loop
+        penalty += 80;
+      }
+    } else if (occurrences === 1) {
+      // 2nd occurrence of this exact board state
+      penalty += 200;
+    }
+
+    return penalty;
+  }
+
   getBestMove(game) {
     const legalMoves = game.getAllLegalMoves(game.turn);
     if (legalMoves.length === 0) return null;
 
+    const isMaximizing = game.turn === WHITE;
+
     // --- CẤP ĐỘ EASY (DỄ / TẬP SỰ) ---
     if (this.difficulty === 'easy') {
-      // 50% cơ hội đi nước ngẫu nhiên đơn giản
+      // Filter out immediate ping-pong moves unless no other choices exist
+      const nonPingPongMoves = legalMoves.filter(m => this.calculateRepetitionPenalty(game, m) === 0);
+      const movePool = nonPingPongMoves.length > 0 ? nonPingPongMoves : legalMoves;
+
+      // 50% cơ hội đi nước ngẫu nhiên đơn giản (ưu tiên ăn quân)
       if (Math.random() < 0.5) {
-        // Ưu tiên ăn quân nếu có thể
-        const captures = legalMoves.filter(m => m.capture);
+        const captures = movePool.filter(m => m.capture);
         if (captures.length > 0 && Math.random() < 0.6) {
           return captures[Math.floor(Math.random() * captures.length)];
         }
-        return legalMoves[Math.floor(Math.random() * legalMoves.length)];
+        return movePool[Math.floor(Math.random() * movePool.length)];
       }
 
-      // 50% còn lại đánh giá 1-ply nhẹ nhàng
-      const isMaximizing = game.turn === WHITE;
-      let bestMove = legalMoves[0];
+      // 50% còn lại đánh giá 1-ply kèm phạt lặp nước
+      let bestMove = movePool[0];
       let bestVal = isMaximizing ? -Infinity : Infinity;
 
-      for (const move of legalMoves) {
+      for (const move of movePool) {
         const clone = game.clone();
         clone.makeMove(move, 'q');
-        const val = clone.evaluate() + (Math.random() * 30 - 15); // Thêm độ lệch ngẫu nhiên
+        const penalty = this.calculateRepetitionPenalty(game, move);
+        const rawVal = clone.evaluate() + (Math.random() * 20 - 10);
+        const val = isMaximizing ? (rawVal - penalty) : (rawVal + penalty);
 
         if (isMaximizing ? val > bestVal : val < bestVal) {
           bestVal = val;
@@ -722,38 +914,51 @@ export class ChessAI {
 
     // --- CẤP ĐỘ MEDIUM & HARD ---
     const depth = this.difficulty === 'hard' ? 3 : 2;
-    const isMaximizing = game.turn === WHITE;
 
     // Sắp xếp nước đi: Ăn quân giá trị cao trước (MVV-LVA)
     this.orderMoves(legalMoves);
 
-    let bestMove = legalMoves[0];
-    let bestVal = isMaximizing ? -Infinity : Infinity;
     let alpha = -Infinity;
     let beta = Infinity;
+    const scoredMoves = [];
 
     for (const move of legalMoves) {
       const clone = game.clone();
       clone.makeMove(move, 'q');
       const val = this.minimax(clone, depth - 1, alpha, beta, !isMaximizing);
+      const penalty = this.calculateRepetitionPenalty(game, move);
+      
+      // Apply repetition penalty to AI's evaluation
+      const adjustedVal = isMaximizing ? (val - penalty) : (val + penalty);
+
+      scoredMoves.push({ move, score: adjustedVal, rawVal: val, penalty });
 
       if (isMaximizing) {
-        if (val > bestVal) {
-          bestVal = val;
-          bestMove = move;
-        }
-        alpha = Math.max(alpha, bestVal);
+        alpha = Math.max(alpha, adjustedVal);
       } else {
-        if (val < bestVal) {
-          bestVal = val;
-          bestMove = move;
-        }
-        beta = Math.min(beta, bestVal);
+        beta = Math.min(beta, adjustedVal);
       }
-      if (beta <= alpha) break;
     }
 
-    return bestMove;
+    // Sort scored moves to find best moves
+    if (isMaximizing) {
+      scoredMoves.sort((a, b) => b.score - a.score);
+    } else {
+      scoredMoves.sort((a, b) => a.score - b.score);
+    }
+
+    const bestScore = scoredMoves[0].score;
+    // Tie-breaker: among top candidate moves within 8 points, pick to introduce diversity
+    // and strictly prefer moves with zero repetition penalty
+    const topCandidates = scoredMoves.filter(item => {
+      return Math.abs(item.score - bestScore) <= 8 && item.penalty === 0;
+    });
+
+    if (topCandidates.length > 0) {
+      return topCandidates[Math.floor(Math.random() * topCandidates.length)].move;
+    }
+
+    return scoredMoves[0].move;
   }
 
   orderMoves(moves) {
@@ -778,9 +983,13 @@ export class ChessAI {
   }
 
   minimax(game, depth, alpha, beta, isMaximizing) {
-    if (depth === 0 || game.isCheckmate || game.isStalemate) {
+    if (depth === 0 || game.isCheckmate || game.isStalemate || game.isThreefoldRepetition || game.isFiftyMoveDraw || game.isInsufficientMaterial) {
+      // Draw conditions evaluate to 0
+      if (game.isThreefoldRepetition || game.isFiftyMoveDraw || game.isInsufficientMaterial || game.isStalemate) {
+        return 0;
+      }
       // Ở độ khó HARD, tìm kiếm thêm các nước ăn quân (Quiescence Search)
-      if (this.difficulty === 'hard' && !game.isCheckmate && !game.isStalemate) {
+      if (this.difficulty === 'hard' && !game.isCheckmate) {
         return this.quiescence(game, alpha, beta, isMaximizing, 1);
       }
       return game.evaluate();
