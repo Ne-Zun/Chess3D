@@ -80,6 +80,9 @@ export class RankEngine {
       try {
         this.profile = JSON.parse(saved);
         if (!this.profile.avatar) this.profile.avatar = '👑';
+        this.profile.tierIndex = Number(this.profile.tierIndex != null ? this.profile.tierIndex : 0);
+        this.profile.subTier = Number(this.profile.subTier != null ? this.profile.subTier : 1);
+        this.profile.rp = Number(this.profile.rp != null ? this.profile.rp : 0);
       } catch (e) {
         this.resetProfile();
       }
