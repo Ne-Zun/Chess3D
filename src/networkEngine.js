@@ -405,18 +405,88 @@ export class NetworkEngine {
     this.sendMessage({ type: 'PLAYER_LEFT' });
   }
 
-  // --- Real-Player Ranked PvP Matchmaking ---
+  // --- Real-Player Ranked PvP Matchmaking Engine ---
+  static getPlayerLevel(player) {
+    if (!player) return 0;
+    const tier = Number(player.tierIndex != null ? player.tierIndex : 0);
+    const sub = Number(player.subTier != null ? player.subTier : 1);
+    return tier * 5 + sub;
+  }
+
+  getStoredActiveTickets() {
+    try {
+      const raw = localStorage.getItem('chess3d_active_ranked_tickets');
+      if (!raw) return [];
+      const list = JSON.parse(raw);
+      if (!Array.isArray(list)) return [];
+      const now = Date.now();
+      // Keep only recent tickets active in the last 4 seconds
+      return list.filter(t => t && t.ticketId && (now - t.timestamp < 4000));
+    } catch (e) {
+      return [];
+    }
+  }
+
+  saveStoredActiveTickets(tickets) {
+    try {
+      localStorage.setItem('chess3d_active_ranked_tickets', JSON.stringify(tickets));
+    } catch (e) {}
+  }
+
+  removeMyStoredTicket() {
+    const list = this.getStoredActiveTickets().filter(t => t.ticketId !== this.myTicketId);
+    this.saveStoredActiveTickets(list);
+  }
+
+  isTicketCompatible(otherTicket) {
+    if (!otherTicket || !otherTicket.player) return false;
+    if (otherTicket.ticketId === this.myTicketId) return false;
+
+    // Direct room invite match
+    if (this.directInviteRoomCode) {
+      return (
+        otherTicket.directInviteRoomCode === this.directInviteRoomCode ||
+        otherTicket.suggestedRoomCode === this.directInviteRoomCode
+      );
+    }
+    if (otherTicket.directInviteRoomCode && otherTicket.directInviteRoomCode === this.generatedMatchRoomCode) {
+      return true;
+    }
+
+    const myLevel = NetworkEngine.getPlayerLevel(this.rankedPlayerInfo);
+    const oppLevel = NetworkEngine.getPlayerLevel(otherTicket.player);
+    const diff = Math.abs(myLevel - oppLevel);
+
+    // Dynamic search expansion:
+    // First 8s: strict ±1 sub-tier (same rank or immediately adjacent sub-tier)
+    // 8s-15s: ±2 sub-tiers
+    // >15s: ±3 sub-tiers
+    const waitSeconds = (Date.now() - (this.queueStartTime || Date.now())) / 1000;
+    const allowedDiff = waitSeconds > 15 ? 3 : (waitSeconds > 8 ? 2 : 1);
+
+    return diff <= allowedDiff;
+  }
+
   startRankedMatchmaking({ playerInfo, directInviteRoomCode = null, onMatchFound, onStatusUpdate, onError }) {
     this.cancelRankedMatchmaking();
     this.isRankedQueuing = true;
     this.rankedOnMatchFound = onMatchFound;
     this.rankedOnStatusUpdate = onStatusUpdate;
     this.rankedOnError = onError;
-    this.rankedPlayerInfo = playerInfo;
-    this.directInviteRoomCode = directInviteRoomCode;
+
+    this.rankedPlayerInfo = {
+      name: playerInfo.name || 'Kỳ Thủ',
+      avatar: playerInfo.avatar || '👑',
+      tierIndex: Number(playerInfo.tierIndex != null ? playerInfo.tierIndex : 0),
+      subTier: Number(playerInfo.subTier != null ? playerInfo.subTier : 1),
+      rp: Number(playerInfo.rp != null ? playerInfo.rp : 0)
+    };
+    this.directInviteRoomCode = directInviteRoomCode ? directInviteRoomCode.trim().toUpperCase() : null;
 
     this.myTicketId = `ticket_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-    this.generatedMatchRoomCode = directInviteRoomCode || NetworkEngine.generateRoomCode();
+    this.generatedMatchRoomCode = this.directInviteRoomCode || NetworkEngine.generateRoomCode();
+    this.queueStartTime = Date.now();
+    this.matchedPairKey = null;
 
     // 1. Setup Local Inter-Tab Matchmaking Channel & Storage listener
     if (typeof BroadcastChannel !== 'undefined') {
@@ -432,14 +502,59 @@ export class NetworkEngine {
           const parsed = JSON.parse(e.newValue);
           this.handleRankedMatchmakingData(parsed);
         } catch (err) {}
+      } else if (e.key === 'chess3d_active_ranked_tickets') {
+        if (this.isRankedQueuing) {
+          const currentList = this.getStoredActiveTickets();
+          const found = currentList.find(t => this.isTicketCompatible(t));
+          if (found) {
+            this.initiateMatchWith(found);
+          }
+        }
       }
     };
     window.addEventListener('storage', this.rankedStorageListener);
 
-    // Broadcast ticket immediately and every 1000ms
-    const broadcastTicket = () => {
+    // 2. Check if a compatible ticket is already active in localStorage
+    const activeTickets = this.getStoredActiveTickets();
+    const existingMatch = activeTickets.find(t => this.isTicketCompatible(t));
+    if (existingMatch) {
+      this.initiateMatchWith(existingMatch);
+      return;
+    }
+
+    // Add myself to active tickets
+    const myTicketObj = {
+      ticketId: this.myTicketId,
+      suggestedRoomCode: this.generatedMatchRoomCode,
+      directInviteRoomCode: this.directInviteRoomCode,
+      player: this.rankedPlayerInfo,
+      timestamp: Date.now()
+    };
+    activeTickets.push(myTicketObj);
+    this.saveStoredActiveTickets(activeTickets);
+
+    // Heartbeat every 800ms
+    const pulseQueue = () => {
       if (!this.isRankedQueuing) return;
-      const ticket = {
+      const currentList = this.getStoredActiveTickets();
+      const found = currentList.find(t => this.isTicketCompatible(t));
+      if (found) {
+        this.initiateMatchWith(found);
+        return;
+      }
+
+      // Upsert self with fresh timestamp
+      const filtered = currentList.filter(t => t.ticketId !== this.myTicketId);
+      filtered.push({
+        ticketId: this.myTicketId,
+        suggestedRoomCode: this.generatedMatchRoomCode,
+        directInviteRoomCode: this.directInviteRoomCode,
+        player: this.rankedPlayerInfo,
+        timestamp: Date.now()
+      });
+      this.saveStoredActiveTickets(filtered);
+
+      const ticketMsg = {
         type: 'RANKED_QUEUE_TICKET',
         ticketId: this.myTicketId,
         suggestedRoomCode: this.generatedMatchRoomCode,
@@ -447,14 +562,70 @@ export class NetworkEngine {
         player: this.rankedPlayerInfo,
         timestamp: Date.now()
       };
-      this.broadcastRankedMessage(ticket);
+      this.broadcastRankedMessage(ticketMsg);
     };
 
-    broadcastTicket();
-    this.rankedBroadcastInterval = setInterval(broadcastTicket, 1000);
+    pulseQueue();
+    this.rankedBroadcastInterval = setInterval(pulseQueue, 800);
 
-    // 2. PeerJS Internet Queue Tier Bucket Matching
-    const tierBucketId = `chess3d-rnk-queue-t${playerInfo.tierIndex}`;
+    // 3. PeerJS Cross-Browser & Cross-Device Tier Bucket Matching
+    const tierBucketId = `c3d-rnk-v4-t${this.rankedPlayerInfo.tierIndex}`;
+    this.isBucketHost = false;
+    this.rankedPeerConns = new Set();
+
+    try {
+      this.rankedPeer = new Peer(tierBucketId, {
+        debug: 0,
+        config: {
+          iceServers: [
+            { urls: 'stun:stun.l.google.com:19302' },
+            { urls: 'stun:global.stun.twilio.com:3478' }
+          ]
+        }
+      });
+
+      this.rankedPeer.on('open', (id) => {
+        this.isBucketHost = true;
+      });
+
+      this.rankedPeer.on('connection', (conn) => {
+        this.rankedPeerConns.add(conn);
+        conn.on('data', (data) => {
+          this.handleRankedMatchmakingData(data, conn);
+        });
+        conn.on('close', () => {
+          if (this.rankedPeerConns) this.rankedPeerConns.delete(conn);
+        });
+
+        const sendHostTicket = () => {
+          try {
+            conn.send({
+              type: 'RANKED_QUEUE_TICKET',
+              ticketId: this.myTicketId,
+              suggestedRoomCode: this.generatedMatchRoomCode,
+              directInviteRoomCode: this.directInviteRoomCode,
+              player: this.rankedPlayerInfo,
+              timestamp: Date.now()
+            });
+          } catch (e) {}
+        };
+        if (conn.open) sendHostTicket();
+        else conn.on('open', sendHostTicket);
+      });
+
+      this.rankedPeer.on('error', (err) => {
+        if (err.type === 'unavailable-id') {
+          // A player is already waiting in this tier bucket! Connect as client
+          try { this.rankedPeer.destroy(); } catch (e) {}
+          this.isBucketHost = false;
+          this.connectAsRankedClient(tierBucketId);
+        }
+      });
+    } catch (e) {}
+  }
+
+  connectAsRankedClient(targetHostId) {
+    if (!this.isRankedQueuing) return;
     try {
       this.rankedPeer = new Peer({
         debug: 0,
@@ -467,30 +638,30 @@ export class NetworkEngine {
       });
 
       this.rankedPeer.on('open', (id) => {
-        // Try connecting to existing tier bucket host
-        const conn = this.rankedPeer.connect(tierBucketId, { reliable: true });
+        const conn = this.rankedPeer.connect(targetHostId, { reliable: true });
+        this.rankedClientConn = conn;
+
         conn.on('open', () => {
-          conn.send({
-            type: 'RANKED_QUEUE_TICKET',
-            ticketId: this.myTicketId,
-            suggestedRoomCode: this.generatedMatchRoomCode,
-            player: this.rankedPlayerInfo,
-            timestamp: Date.now()
-          });
+          try {
+            conn.send({
+              type: 'RANKED_QUEUE_TICKET',
+              ticketId: this.myTicketId,
+              suggestedRoomCode: this.generatedMatchRoomCode,
+              directInviteRoomCode: this.directInviteRoomCode,
+              player: this.rankedPlayerInfo,
+              timestamp: Date.now()
+            });
+          } catch (e) {}
         });
 
         conn.on('data', (data) => {
-          this.handleRankedMatchmakingData(data);
+          this.handleRankedMatchmakingData(data, conn);
         });
 
         conn.on('error', () => {});
       });
 
-      this.rankedPeer.on('connection', (conn) => {
-        conn.on('data', (data) => {
-          this.handleRankedMatchmakingData(data);
-        });
-      });
+      this.rankedPeer.on('error', () => {});
     } catch (e) {}
   }
 
@@ -504,77 +675,106 @@ export class NetworkEngine {
     } catch (e) {}
   }
 
-  handleRankedMatchmakingData(data) {
+  initiateMatchWith(oppTicket) {
+    if (!this.isRankedQueuing) return;
+
+    const pairKey = [this.myTicketId, oppTicket.ticketId].sort().join('__');
+    if (this.matchedPairKey === pairKey) return;
+    this.matchedPairKey = pairKey;
+
+    const isHost = this.myTicketId < oppTicket.ticketId;
+    const roomCode = isHost ? this.generatedMatchRoomCode : (oppTicket.suggestedRoomCode || this.generatedMatchRoomCode);
+
+    // Deterministic 50/50 color assignment from pairKey
+    const hash = pairKey.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
+    const hostColor = (hash % 2 === 0) ? 'w' : 'b';
+
+    const matchPayload = {
+      type: 'RANKED_MATCH_LOCKED',
+      pairKey,
+      roomCode,
+      hostTicketId: isHost ? this.myTicketId : oppTicket.ticketId,
+      guestTicketId: isHost ? oppTicket.ticketId : this.myTicketId,
+      hostPlayer: isHost ? this.rankedPlayerInfo : oppTicket.player,
+      guestPlayer: isHost ? oppTicket.player : this.rankedPlayerInfo,
+      hostColor,
+      timestamp: Date.now()
+    };
+
+    // Broadcast repeatedly to guarantee delivery across local bus
+    this.broadcastRankedMessage(matchPayload);
+    setTimeout(() => this.broadcastRankedMessage(matchPayload), 80);
+    setTimeout(() => this.broadcastRankedMessage(matchPayload), 180);
+    setTimeout(() => this.broadcastRankedMessage(matchPayload), 350);
+
+    this.acceptRankedMatch(matchPayload, isHost);
+  }
+
+  handleRankedMatchmakingData(data, sourceConn = null) {
     if (!this.isRankedQueuing || !data || typeof data !== 'object') return;
     if (data._senderTicketId === this.myTicketId || data.ticketId === this.myTicketId) return;
 
     if (data.type === 'RANKED_QUEUE_TICKET' && data.player) {
-      // Calculate rank proximity: difference within ±1 sub-rank
-      const myLevel = this.rankedPlayerInfo.tierIndex * 5 + this.rankedPlayerInfo.subTier;
-      const oppLevel = data.player.tierIndex * 5 + data.player.subTier;
-
-      if (Math.abs(myLevel - oppLevel) <= 1 || data.directInviteRoomCode === this.generatedMatchRoomCode) {
-        // Matched! Whichever ticketId is smaller initiates proposal to avoid race condition
-        if (this.myTicketId < data.ticketId || data.directInviteRoomCode === this.generatedMatchRoomCode) {
-          const roomCode = this.generatedMatchRoomCode || NetworkEngine.generateRoomCode();
-          const hostColor = Math.random() < 0.5 ? 'w' : 'b';
-          const proposal = {
-            type: 'RANKED_MATCH_PROPOSAL',
-            proposalId: `${this.myTicketId}_${data.ticketId}`,
-            roomCode,
-            initiatorTicketId: this.myTicketId,
-            targetTicketId: data.ticketId,
-            hostPlayer: this.rankedPlayerInfo,
-            guestPlayer: data.player,
-            hostColor
-          };
-          this.broadcastRankedMessage(proposal);
-          setTimeout(() => this.broadcastRankedMessage(proposal), 80);
-          setTimeout(() => this.broadcastRankedMessage(proposal), 160);
-          this.acceptRankedMatch(proposal, true);
-        }
+      if (this.isTicketCompatible(data)) {
+        this.initiateMatchWith(data);
       }
-    } else if (data.type === 'RANKED_MATCH_PROPOSAL') {
-      if (data.targetTicketId === this.myTicketId) {
-        this.acceptRankedMatch(data, false);
+    } else if (data.type === 'RANKED_MATCH_LOCKED') {
+      if (data.hostTicketId === this.myTicketId || data.guestTicketId === this.myTicketId) {
+        const isHost = data.hostTicketId === this.myTicketId;
+        this.acceptRankedMatch(data, isHost);
       }
     }
   }
 
-  acceptRankedMatch(proposal, isInitiator) {
+  acceptRankedMatch(matchData, isHost) {
     if (!this.isRankedQueuing) return;
     this.isRankedQueuing = false;
 
-    // Stop queue interval immediately
+    // Immediately stop queue heartbeat & clean storage
     if (this.rankedBroadcastInterval) {
       clearInterval(this.rankedBroadcastInterval);
       this.rankedBroadcastInterval = null;
     }
+    this.removeMyStoredTicket();
 
-    // Gracefully teardown queue channels after handshakes complete
+    // Notify connected PeerJS client/host if any
+    if (this.rankedClientConn && this.rankedClientConn.open) {
+      try { this.rankedClientConn.send(matchData); } catch (e) {}
+    }
+    if (this.rankedPeerConns) {
+      this.rankedPeerConns.forEach(conn => {
+        if (conn && conn.open) {
+          try { conn.send(matchData); } catch (e) {}
+        }
+      });
+    }
+
+    // Teardown queue peer & listeners after small delay to let messages flush
     setTimeout(() => {
       this.cancelRankedMatchmaking();
-    }, 1200);
+    }, 1500);
 
-    const opponent = isInitiator ? proposal.guestPlayer : proposal.hostPlayer;
-    const myColor = isInitiator ? proposal.hostColor : (proposal.hostColor === 'w' ? 'b' : 'w');
+    const opponent = isHost ? matchData.guestPlayer : matchData.hostPlayer;
+    const myColor = isHost ? matchData.hostColor : (matchData.hostColor === 'w' ? 'b' : 'w');
 
     if (this.rankedOnMatchFound) {
       this.rankedOnMatchFound({
         opponent,
-        roomCode: proposal.roomCode,
+        roomCode: matchData.roomCode,
         myColor,
-        isHost: isInitiator
+        isHost
       });
     }
   }
 
   cancelRankedMatchmaking() {
     this.isRankedQueuing = false;
+    this.matchedPairKey = null;
     if (this.rankedBroadcastInterval) {
       clearInterval(this.rankedBroadcastInterval);
       this.rankedBroadcastInterval = null;
     }
+    this.removeMyStoredTicket();
     if (this.rankedChannel) {
       try { this.rankedChannel.close(); } catch (e) {}
       this.rankedChannel = null;
@@ -582,6 +782,15 @@ export class NetworkEngine {
     if (this.rankedStorageListener) {
       window.removeEventListener('storage', this.rankedStorageListener);
       this.rankedStorageListener = null;
+    }
+    if (this.rankedClientConn) {
+      try { this.rankedClientConn.close(); } catch (e) {}
+      this.rankedClientConn = null;
+    }
+    if (this.rankedPeerConns) {
+      this.rankedPeerConns.forEach(c => { try { c.close(); } catch (e) {} });
+      this.rankedPeerConns.clear();
+      this.rankedPeerConns = null;
     }
     if (this.rankedPeer) {
       try { this.rankedPeer.destroy(); } catch (e) {}

@@ -672,9 +672,9 @@ class ChessApp {
       playerInfo: {
         name: this.rankEngine.profile.name,
         avatar: this.rankEngine.profile.avatar || '👑',
-        tierIndex: this.rankEngine.profile.tierIndex,
-        subTier: this.rankEngine.profile.subTier,
-        rp: this.rankEngine.profile.rp
+        tierIndex: Number(this.rankEngine.profile.tierIndex != null ? this.rankEngine.profile.tierIndex : 0),
+        subTier: Number(this.rankEngine.profile.subTier != null ? this.rankEngine.profile.subTier : 1),
+        rp: Number(this.rankEngine.profile.rp != null ? this.rankEngine.profile.rp : 0)
       },
       directInviteRoomCode: directInviteRoom,
       onMatchFound: ({ opponent, roomCode, myColor, isHost }) => {
